@@ -1,0 +1,52 @@
+description: >
+  Publishes an npm package using npm Trusted Publishing (OIDC) instead of a
+  long-lived npm automation token. Mirrors the "Publish to npm (OIDC trusted
+  publishing)" step duplicated across circleci-configurations'
+  workflows/publish/*.yaml files: npm-polyrepo, npm-polyrepo-bun and
+  npm-polyrepo-release-please all share the exact step body, while
+  npm-monorepo only swaps `npm publish` for `pnpm changeset:publish`, which
+  is why the publish command is parameterized rather than hardcoded here.
+  Before running this command, legacy token auth (NODE_AUTH_TOKEN /
+  NPM_TOKEN, and any committed .npmrc `_authToken` line) must be absent, or
+  npm will treat the registry as token-authenticated and skip the OIDC
+  exchange entirely. The command itself unsets NODE_AUTH_TOKEN / NPM_TOKEN
+  before requesting the OIDC token, but a committed .npmrc must be cleaned up
+  separately. The OIDC token value is never written to the job log -- only
+  its emptiness (a fail-fast exit 1) is observable. `--provenance` is
+  deliberately never appended to publish_command: npm's CLI explicitly
+  excludes CircleCI (`!ciInfo.CIRCLE`) from automatic provenance generation,
+  and npm's own Trusted Publishing docs state provenance generation is not
+  currently supported for CircleCI, so the flag would be a guaranteed no-op.
+  Requires npm >= 11.11.0: npm's general Trusted Publishing floor is
+  >= 11.5.1, but CircleCI-specific OIDC auto-detection landed in npm/cli PR
+  #8925 and only ships from 11.11.0 onward, so that is the effective floor
+  on CircleCI (cimg/node:24.19 and newer ship npm 11.17.0+ and satisfy it
+  out of the box; Node 22.x images do not ship npm >= 11 at all).
+
+parameters:
+  publish_command:
+    type: string
+    default: "npm publish"
+    description: >
+      The shell command that performs the actual publish once NPM_ID_TOKEN
+      is exported. Defaults to `npm publish` for polyrepo packages; pass
+      `pnpm changeset:publish` for a Changesets monorepo (npm-monorepo.yaml's
+      equivalent). Never append `--provenance` -- see the command
+      description for why it is a no-op on CircleCI. Supports pipeline value
+      interpolation via `circleci env subst`.
+  audience:
+    type: string
+    default: "npm:registry.npmjs.org"
+    description: >
+      The `aud` claim requested when minting the OIDC ID token via
+      `circleci run oidc get --claims`. Fixed to the npm registry audience by
+      default; override only if publishing to a registry that expects a
+      different OIDC audience value.
+
+steps:
+  - run:
+      name: Publish to npm (OIDC trusted publishing)
+      environment:
+        PARAM_PUBLISH_COMMAND: <<parameters.publish_command>>
+        PARAM_AUDIENCE: <<parameters.audience>>
+      command: <<include(scripts/npm_publish_oidc.sh)>>
