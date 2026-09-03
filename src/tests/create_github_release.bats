@@ -13,6 +13,16 @@
 # sourced, so its "Will not run if sourced for bats-core tests" guard does
 # not apply here and main() executes exactly as it would in a real job.
 
+# bats-core hook run before every @test in this file.
+# Args: none.
+# Returns: 0 (any non-zero status here would abort the test as an error).
+# Side effects: resolves SCRIPT to the path under test; creates a fresh
+#   TEST_DIR with a STUB_BIN directory containing `gh` and `circleci-agent`
+#   stubs (prepended onto PATH) plus empty CALL_LOG / HALT_LOG files for the
+#   stubs to append to; exports the PARAM_* env vars the script reads by
+#   default; and unsets RELEASE_TAG / PREV_RELEASE_TAG /
+#   RELEASE_NOTES_SOURCE / RELEASE_NOTES_FILE so each test starts from a
+#   clean, known environment.
 setup() {
   REPO_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/../.." && pwd)"
   SCRIPT="${REPO_ROOT}/src/scripts/create_github_release.sh"
@@ -63,6 +73,12 @@ EOF
   unset RELEASE_TAG PREV_RELEASE_TAG RELEASE_NOTES_SOURCE RELEASE_NOTES_FILE || true
 }
 
+# bats-core hook run after every @test in this file.
+# Args: none.
+# Returns: 0.
+# Side effects: recursively removes TEST_DIR (the stub bin, CALL_LOG, and
+#   HALT_LOG created in setup), leaving no fixture state behind between
+#   tests or after the run.
 teardown() {
   rm -rf "${TEST_DIR}"
 }

@@ -23,6 +23,21 @@ set -euo pipefail
 #   3. Otherwise (first release for this repo, or Deploy Diff Summaries and
 #      resolve_previous_deploy_tag both found nothing): --generate-notes
 #      with no start tag.
+#
+# Args: none (takes no positional arguments).
+# Reads (indirectly, via the PARAM_*_ENV name parameters, all exported by
+# the calling orb command step):
+#   PARAM_TAG_ENV           - name of the env var holding the release tag
+#   PARAM_SKIP_IF_EXISTS    - "true"/"false"; whether to no-op on an
+#                             existing release for the tag
+#   PARAM_NOTES_SOURCE_ENV  - name of the env var selecting the notes source
+#   PARAM_PREV_TAG_ENV      - name of the env var holding the previous tag
+#   PARAM_NOTES_FILE_ENV    - name of the env var holding the notes file path
+# Returns: 0 on success (including the idempotent-skip no-op path); exits 1
+#   if the resolved release tag is empty.
+# Side effects: may run `gh release view` / `gh release create` (network
+#   call to GitHub), may call `circleci-agent step halt` (halts the step
+#   without failing the job), and writes progress messages to stdout/stderr.
 create_github_release() {
     local tag_env tag
     local prev_tag_env prev_tag
@@ -62,6 +77,12 @@ create_github_release() {
     fi
 }
 
+# Entry point invoked when this script is executed directly (not sourced
+# by bats-core; see the guard below).
+# Args: none.
+# Returns: the exit status of create_github_release.
+# Side effects: same as create_github_release (gh release view/create,
+#   possible circleci-agent step halt).
 main() {
     create_github_release
 }
