@@ -7,17 +7,23 @@ PAYLOAD_SCRIPT="${BATS_TEST_DIRNAME}/../scripts/make_diff_summary_payload.sh"
 FETCH_SCRIPT="${BATS_TEST_DIRNAME}/../scripts/fetch_deploy_diff_summary.sh"
 
 # bats-core lifecycle hook, run before every @test in this file. Creates an
-# isolated temp git repo and a PATH-stubbed `circleci` CLI, and points
-# $BASH_ENV at a scratch file so tests can assert on the exports the
-# scripts under test append to it.
+# isolated temp git repo, a PATH-stubbed standalone `circleci` CLI (the
+# `api` subcommand), and a separate build-agent CLI stub pointed to by
+# $CIRCLECI_CLI (the `env subst` subcommand) — the two are stubbed
+# independently because the scripts under test deliberately call two
+# different CircleCI CLIs (see the CIRCLECI_CLI note near the top of each
+# script). Points $BASH_ENV at a scratch file so tests can assert on the
+# exports the scripts under test append to it.
 # Args:
 #   None (bats lifecycle hook — no arguments).
 # Side effects:
 #   Creates $TEST_DIR/$BIN_DIR/$REPO_DIR, cd's into $REPO_DIR and git-inits
 #   it, exports BASH_ENV/CIRCLE_PROJECT_ID/CIRCLE_ORGANIZATION_ID/
-#   CIRCLE_TOKEN/PARAM_CIRCLE_TOKEN_ENV, unsets the RELEASE_*/PARAM_* vars
-#   the scripts under test read, and writes an executable `circleci` stub
-#   onto the front of PATH.
+#   CIRCLE_TOKEN/PARAM_CIRCLE_TOKEN_ENV/CIRCLECI_CLI, unsets the
+#   RELEASE_*/PARAM_* vars the scripts under test read, and writes two
+#   executable CLI stubs: `circleci` onto the front of PATH (the standalone
+#   CLI's `api` subcommand) and $CIRCLECI_CLI (the build-agent CLI's
+#   `env subst` subcommand).
 setup() {
   TEST_DIR="$(mktemp -d)"
   BIN_DIR="${TEST_DIR}/bin"
@@ -42,15 +48,24 @@ setup() {
   unset RELEASE_TAG PREV_RELEASE_TAG DEPLOY_DIFF_PAYLOAD_FILE RELEASE_NOTES_SOURCE RELEASE_NOTES_FILE
   unset PARAM_BASE_REF PARAM_HEAD_REF PARAM_OUTPUT_FILE PARAM_MAX_POLLS PARAM_POLL_INTERVAL
 
-  # `circleci env subst` passthrough stub (identity — no ${...} in fixtures)
-  # plus a `circleci api` stub whose response is driven by the STUB_*
-  # env vars a test sets before calling the fetch script.
-  cat > "${BIN_DIR}/circleci" <<'STUB'
+  # Build-agent CLI stub: only `env subst`, as an identity passthrough
+  # (fixtures never contain ${...} expressions to actually substitute).
+  # $CIRCLECI_CLI is what the scripts under test call for env subst.
+  cat > "${BIN_DIR}/circleci-buildagent" <<'STUB'
 #!/usr/bin/env bash
 if [ "$1" = "env" ] && [ "$2" = "subst" ]; then
   printf '%s' "${3:-}"
   exit 0
 fi
+exit 1
+STUB
+  chmod +x "${BIN_DIR}/circleci-buildagent"
+  export CIRCLECI_CLI="${BIN_DIR}/circleci-buildagent"
+
+  # Standalone CLI stub on PATH: only `api`, whose response is driven by
+  # the STUB_* env vars a test sets before calling the script under test.
+  cat > "${BIN_DIR}/circleci" <<'STUB'
+#!/usr/bin/env bash
 if [ "$1" = "api" ]; then
   shift
   if [ "$1" = "deploy/diff-summaries" ] && [ "$2" = "-d" ]; then

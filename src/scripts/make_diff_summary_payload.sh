@@ -15,6 +15,18 @@ set -uo pipefail
 # instead of aborting the step non-zero (this command must never block a
 # release on Deploy Diff Summaries being unavailable).
 
+# This script calls two different CircleCI CLIs, on purpose:
+#   - The build-agent CLI at /usr/bin/circleci (CIRCLECI_CLI below) ships in
+#     every job container regardless of PATH, and is what provides
+#     `env subst`. cimg images also put a *different* CLI on PATH, so calling
+#     `env subst` unqualified would use whichever one PATH resolves to.
+#   - `circleci api ...` (in resolve_org_id) is deliberately left as bare
+#     `circleci` on PATH: it needs the standalone CLI's `api` subcommand,
+#     which the build-agent CLI does not have. That standalone CLI is
+#     installed onto PATH by the install_circleci_cli command, which must
+#     run before this one.
+CIRCLECI_CLI="${CIRCLECI_CLI:-/usr/bin/circleci}"
+
 # Maps a `git diff --name-status` letter to the payload's status vocabulary.
 # Args:
 #   $1 - status - a git diff --name-status letter/code (e.g. "A", "M", "R100", "C100").
@@ -113,6 +125,9 @@ build_payload() {
 
 # Resolves the CircleCI organization id: $CIRCLE_ORGANIZATION_ID when set
 # (normal case in an actual CircleCI job), else `circleci api projects/<id>`.
+# `circleci` here is deliberately bare/on-PATH: it is the standalone CLI's
+# `api` subcommand (installed by install_circleci_cli), not the build-agent
+# CLI at $CIRCLECI_CLI used for `env subst` elsewhere in this file.
 # Args:
 #   $1 - project_id - CircleCI project id, used to look up the org id when
 #        $CIRCLE_ORGANIZATION_ID is not already set.
@@ -192,8 +207,8 @@ fall_back_to_gh_generate_notes() {
 main() {
   local base_ref head_ref token_env token_value project_id org_id payload_file
 
-  base_ref="$(circleci env subst "${PARAM_BASE_REF:-}")"
-  head_ref="$(circleci env subst "${PARAM_HEAD_REF:-}")"
+  base_ref="$("$CIRCLECI_CLI" env subst "${PARAM_BASE_REF:-}")"
+  head_ref="$("$CIRCLECI_CLI" env subst "${PARAM_HEAD_REF:-}")"
   token_env="${PARAM_CIRCLE_TOKEN_ENV:-CIRCLE_TOKEN}"
   token_value="${!token_env:-}"
   payload_file="${DEPLOY_DIFF_PAYLOAD_FILE:-/tmp/diff-summary-payload.json}"

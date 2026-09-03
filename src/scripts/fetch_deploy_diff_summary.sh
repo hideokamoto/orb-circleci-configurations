@@ -18,6 +18,18 @@ set -uo pipefail
 # through to the gh-generate-notes fallback branch instead of aborting the
 # step non-zero (this command must never block a release).
 
+# This script calls two different CircleCI CLIs, on purpose:
+#   - The build-agent CLI at /usr/bin/circleci (CIRCLECI_CLI below) ships in
+#     every job container regardless of PATH, and is what provides
+#     `env subst`. cimg images also put a *different* CLI on PATH, so calling
+#     `env subst` unqualified would use whichever one PATH resolves to.
+#   - `circleci api ...` (in poll_for_summary) is deliberately left as bare
+#     `circleci` on PATH: it needs the standalone CLI's `api` subcommand,
+#     which the build-agent CLI does not have. That standalone CLI is
+#     installed onto PATH by the install_circleci_cli command, which must
+#     run before this one.
+CIRCLECI_CLI="${CIRCLECI_CLI:-/usr/bin/circleci}"
+
 # Logs why Deploy Diff Summaries is being skipped and exports the
 # non-blocking fallback marker for downstream release-creation steps.
 # Args:
@@ -36,7 +48,8 @@ fall_back_to_gh_generate_notes() {
 # deploy/diff-summaries/<id> up to max_polls times (poll_interval seconds
 # apart) until phase == ended, then prints the summary text on stdout.
 # Prints nothing and returns 1 on any failure (missing id, timeout, or an
-# empty summary).
+# empty summary). `circleci` here is deliberately bare/on-PATH — see the
+# CIRCLECI_CLI note near the top of this file.
 # Args:
 #   $1 - payload_file  - path to the JSON payload built by
 #        make_diff_summary_payload.sh.
@@ -95,7 +108,7 @@ main() {
     exit 0
   fi
 
-  output_file="$(circleci env subst "${PARAM_OUTPUT_FILE:-/tmp/release-notes.md}")"
+  output_file="$("$CIRCLECI_CLI" env subst "${PARAM_OUTPUT_FILE:-/tmp/release-notes.md}")"
   max_polls="${PARAM_MAX_POLLS:-30}"
   poll_interval="${PARAM_POLL_INTERVAL:-2}"
 

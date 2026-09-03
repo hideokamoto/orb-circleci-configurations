@@ -14,6 +14,13 @@ description: >
   Requires the standalone CircleCI CLI (`circleci api ...`) on PATH — run
   the install_circleci_cli command first.
 
+  Calls two different CircleCI CLIs on purpose: `circleci api ...` calls
+  use the standalone CLI on PATH (installed by install_circleci_cli, the
+  only one with an `api` subcommand), while `env subst` calls use the
+  build-agent CLI at the fixed path /usr/bin/circleci — present in every
+  job container regardless of PATH — since a bare `circleci env subst`
+  would otherwise resolve to whichever CLI PATH finds first.
+
   Non-blocking by design: whenever the CircleCI project id, an API token,
   the organization id, or the head revision cannot be resolved, or the API
   call itself fails, times out, or returns an empty summary, this command
