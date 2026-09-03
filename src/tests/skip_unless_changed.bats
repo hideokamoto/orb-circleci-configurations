@@ -4,6 +4,16 @@
 # parent-commit fallback), the fail-safe continue paths, and both skip
 # modes.
 
+# bats-core lifecycle hook, run before every @test in this file. Takes no
+# arguments (bats calls it with none). Builds a throwaway git fixture (a
+# bare "origin" plus a clone checked out as the working repo), stubs
+# circleci-agent (to record halt calls) and the circleci CLI referenced via
+# CIRCLECI_CLI (so tests never depend on a real circleci binary), and
+# exports the PARAM_* env vars each @test's script invocation reads, set to
+# the command's own parameter defaults. Side effects: creates a temp
+# directory tree, prepends it to PATH, cds into the fixture repo, and
+# exports TEST_DIR/STUB_DIR/HALT_LOG/ORIGIN/REPO/CIRCLECI_CLI plus the
+# PARAM_* variables for the test body to read or override.
 setup() {
     SCRIPT="$(cd "$(dirname "$BATS_TEST_FILENAME")/../.." && pwd)/src/scripts/skip_unless_changed.sh"
 
@@ -21,6 +31,21 @@ EOF
     chmod +x "$STUB_DIR/circleci-agent"
     PATH="$STUB_DIR:$PATH"
 
+    # circleci CLI stub, referenced via CIRCLECI_CLI (not PATH) exactly as
+    # the script does, so this suite exercises the same indirection real
+    # jobs use on images without a circleci binary on PATH (e.g. cimg/base).
+    # None of the fixtures below pass parameter values containing a $VAR
+    # reference, so a verbatim passthrough of `env subst`'s argument is a
+    # faithful enough stand-in for the real subcommand's behavior here.
+    CIRCLECI_CLI="$STUB_DIR/circleci-cli"
+    cat > "$CIRCLECI_CLI" <<'EOF'
+#!/usr/bin/env bash
+if [ "$1" = "env" ] && [ "$2" = "subst" ]; then
+    printf '%s' "$3"
+fi
+EOF
+    chmod +x "$CIRCLECI_CLI"
+
     # Fixture repo: a local origin plus a clone that steps run against, so
     # that "git fetch --tags origin" in the deploy_tag fallback has a real
     # remote to talk to without touching the network.
@@ -33,7 +58,7 @@ EOF
     git config user.email "test@example.com"
     git config user.name "Test"
 
-    export TEST_DIR STUB_DIR HALT_LOG ORIGIN REPO
+    export TEST_DIR STUB_DIR HALT_LOG ORIGIN REPO CIRCLECI_CLI
 
     # Defaults matching the command's parameter defaults; each test
     # overrides only what it needs.
@@ -45,10 +70,18 @@ EOF
     export PARAM_DEPLOY_TAG_GLOB='[0-9][0-9][0-9][0-9].[0-9][0-9].[0-9][0-9]-*'
 }
 
+# bats-core lifecycle hook, run after every @test in this file. Takes no
+# arguments. Side effect: recursively removes TEST_DIR (the fixture repo,
+# stubs, and halt log created by setup), leaving no state behind.
 teardown() {
     rm -rf "$TEST_DIR"
 }
 
+# Test helper: writes $2 as the content of file $1 (creating parent
+# directories as needed), stages it, and commits it in the current git
+# repo (the fixture REPO checked out by setup). Args: $1 path, $2 file
+# content. No output; side effect is the new commit, and it leaves HEAD
+# pointing at it.
 commit_file() {
     # commit_file <path> <content>
     mkdir -p "$(dirname "$1")"

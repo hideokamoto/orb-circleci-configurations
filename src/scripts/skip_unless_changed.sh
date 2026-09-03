@@ -15,19 +15,37 @@ set -euo pipefail
 # the job continue instead of guessing wrong and skipping work that should
 # have run.
 
+# The standalone `circleci` CLI is not guaranteed to be on PATH — cimg/base
+# (this orb's own base_pinned executor) does not ship it there, only the
+# build-agent CLI CircleCI injects into every job at /usr/bin/circleci. Call
+# through this variable instead of a bare `circleci` so a PATH lookup can
+# never silently fail with "command not found" under `set -e`, and so BATS
+# can point it at a stub instead of requiring a real circleci binary.
+# (circleci-agent, used for `step halt` below, is a separate binary that
+# CircleCI does put on PATH in every job, so it is called directly.)
+CIRCLECI_CLI="${CIRCLECI_CLI:-/usr/bin/circleci}"
+
+# Resolves the head revision to diff to: PARAM_HEAD_REVISION (subst'd, so a
+# caller may pass a literal $VAR reference), or $CIRCLE_SHA1 when that
+# parameter is empty. Takes no arguments. Prints the resolved revision to
+# stdout; has no other side effects.
 resolve_head() {
     local head
-    head="$(circleci env subst "${PARAM_HEAD_REVISION}")"
+    head="$("$CIRCLECI_CLI" env subst "${PARAM_HEAD_REVISION}")"
     if [ -z "$head" ]; then
         head="${CIRCLE_SHA1:-}"
     fi
     printf '%s' "$head"
 }
 
-# Sets the BASE and BASE_SOURCE globals.
+# Resolves PARAM_FALLBACK=deploy_tag: finds the most recent tag matching
+# PARAM_DEPLOY_TAG_GLOB that is reachable from $HEAD (the commit a previous
+# successful deploy tagged), after a best-effort tag fetch. Takes no
+# arguments and reads the $HEAD global set by main. Prints nothing; sets
+# the BASE and BASE_SOURCE globals as its side effect.
 resolve_base_from_deploy_tag() {
     local glob tag
-    glob="$(circleci env subst "${PARAM_DEPLOY_TAG_GLOB}")"
+    glob="$("$CIRCLECI_CLI" env subst "${PARAM_DEPLOY_TAG_GLOB}")"
     # Deploy tags land on the default branch after this checkout was made;
     # fetch them before describing. Best-effort: an unreachable/read-only
     # remote should not fail the whole job here, it should just leave no
@@ -43,10 +61,16 @@ resolve_base_from_deploy_tag() {
     fi
 }
 
-# Sets the BASE and BASE_SOURCE globals. Requires HEAD to already be set.
+# Resolves the base revision to diff from: PARAM_BASE_REVISION (subst'd)
+# when non-empty, otherwise the strategy named by PARAM_FALLBACK
+# (deploy_tag / parent_commit / none). Takes no arguments and reads the
+# $HEAD global, which must already be set (resolve_base_from_deploy_tag
+# needs it). Prints nothing; sets the BASE and BASE_SOURCE globals. Exits
+# the script with status 1 if PARAM_FALLBACK is not one of the three known
+# values.
 resolve_base() {
     local base
-    base="$(circleci env subst "${PARAM_BASE_REVISION}")"
+    base="$("$CIRCLECI_CLI" env subst "${PARAM_BASE_REVISION}")"
     if [ -n "$base" ]; then
         BASE="$base"
         BASE_SOURCE="base_revision parameter"
@@ -72,16 +96,23 @@ resolve_base() {
     esac
 }
 
-# Echoes 1 changed path per line.
+# Lists the paths that differ between $BASE and $HEAD (the globals set by
+# resolve_base/resolve_head). Takes no arguments. Prints one changed path
+# per line to stdout; has no other side effects.
 changed_files() {
     git diff --name-only "$BASE" "$HEAD"
 }
 
-# Returns 0 (true) when the changed paths mean this job should halt, 1
-# (false) when it should continue. Expects the changed paths on stdin.
+# Decides, from the changed paths on stdin (one per line) and
+# PARAM_MODE/PARAM_PATTERN, whether the job should be halted.
+# skip_if_only_matches halts only when every changed path matches pattern;
+# skip_unless_matches halts only when no changed path matches pattern.
+# Prints nothing. Returns (exits the function with) status 0 when the job
+# should halt, 1 when it should continue; exits the whole script with
+# status 1 if PARAM_MODE is not one of the two known values.
 should_halt() {
     local pattern
-    pattern="$(circleci env subst "${PARAM_PATTERN}")"
+    pattern="$("$CIRCLECI_CLI" env subst "${PARAM_PATTERN}")"
     case "$PARAM_MODE" in
         skip_if_only_matches)
             # Halt only when every changed path matches pattern, i.e. none
@@ -105,6 +136,12 @@ should_halt() {
     esac
 }
 
+# Entry point: resolves head and base, logs the decision inputs, and either
+# halts the job (circleci-agent step halt) or lets it continue, per the
+# fail-safe rules described at the top of this file. Takes no arguments and
+# reads the PARAM_* environment variables the orb command sets. Side
+# effects: writes progress/decision output to stdout, and calls
+# `circleci-agent step halt` when the skip condition is met.
 main() {
     HEAD="$(resolve_head)"
     resolve_base
