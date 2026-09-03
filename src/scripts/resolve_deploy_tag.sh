@@ -12,12 +12,32 @@
 # deterministic and immune to clock/timezone skew between steps.
 set -euo pipefail
 
+# cimg/base does not put the standalone `circleci` CLI on PATH; the job
+# environment only guarantees the build-agent CLI at /usr/bin/circleci.
+# Allow overriding for tests (bats points this at a PATH stub).
+CIRCLECI_CLI="${CIRCLECI_CLI:-/usr/bin/circleci}"
+
+# Resolve the deploy tag pointing at a commit and export it to $BASH_ENV.
+#
+# Arguments: none (reads its inputs from the PARAM_* environment variables
+#   set by the orb command's `run` step: PARAM_TAG_REGEX, PARAM_COMMIT,
+#   PARAM_OUTPUT_ENV, PARAM_HALT_IF_MISSING; also reads CIRCLE_SHA1 when
+#   PARAM_COMMIT resolves to an empty string, and $CIRCLECI_CLI for the
+#   `circleci` binary to run `env subst` through).
+# Returns: 0 on both a resolved tag and a missing tag with
+#   PARAM_HALT_IF_MISSING="false"; does not return when
+#   PARAM_HALT_IF_MISSING="true" and no tag matches, since
+#   `circleci-agent step halt` ends the step there.
+# Side effects: runs `git fetch --tags --force origin` against the current
+#   working directory's repo; on a match, appends
+#   `export <PARAM_OUTPUT_ENV>="<tag>"` to $BASH_ENV so later steps in the
+#   same job can read it.
 resolve_deploy_tag() {
     local tag_regex commit output_env halt_if_missing tag
 
-    tag_regex="$(circleci env subst "${PARAM_TAG_REGEX}")"
-    commit="$(circleci env subst "${PARAM_COMMIT}")"
-    output_env="$(circleci env subst "${PARAM_OUTPUT_ENV}")"
+    tag_regex="$("$CIRCLECI_CLI" env subst "${PARAM_TAG_REGEX}")"
+    commit="$("$CIRCLECI_CLI" env subst "${PARAM_COMMIT}")"
+    output_env="$("$CIRCLECI_CLI" env subst "${PARAM_OUTPUT_ENV}")"
     halt_if_missing="${PARAM_HALT_IF_MISSING}"
 
     if [ -z "$commit" ]; then
@@ -42,6 +62,11 @@ resolve_deploy_tag() {
     echo "export ${output_env}=\"${tag}\"" >> "$BASH_ENV"
 }
 
+# Entry point invoked when this script is executed directly (not sourced).
+#
+# Arguments: none.
+# Returns: whatever resolve_deploy_tag returns.
+# Side effects: same as resolve_deploy_tag.
 main() {
     resolve_deploy_tag
 }

@@ -1,5 +1,22 @@
 #!/usr/bin/env bats
 
+# Build the per-test fixture: a PATH-prepended bin dir with a stub for
+# `circleci-agent` (records its args to $HALT_LOG) plus a stub CLI
+# (implements only `env subst`, echoing its argument back verbatim) that
+# $CIRCLECI_CLI is pointed at directly — the script under test never
+# resolves `circleci` off PATH, matching the real cimg/base job
+# environment where only /usr/bin/circleci exists. Also builds a temp
+# $BASH_ENV file, a local non-bare git repo ("repo") wired to a local bare
+# "remote.git" as its `origin` (no real network target), exports the
+# default PARAM_* values every test starts from, and points $SCRIPT at
+# the script under test.
+#
+# Arguments: none (bats-core calls this automatically before each @test).
+# Returns: bats-core's own semantics; a non-zero exit here fails the test.
+# Side effects: creates $TEST_DIR and its contents; mutates $PATH,
+#   $BASH_ENV, $CIRCLE_SHA1, $CIRCLECI_CLI, and the PARAM_* environment
+#   variables for the duration of the test; changes the shell's working
+#   directory into the fixture repo.
 setup() {
     ORIG_PATH="$PATH"
     TEST_DIR="$(mktemp -d)"
@@ -17,10 +34,13 @@ exit 0
 EOF
     chmod +x "$BIN_DIR/circleci-agent"
 
-    # Stub for `circleci env subst <value>`: none of these tests feed pipeline
-    # value templates through the parameters, so it just echoes its argument
-    # back, matching env subst's behavior on plain strings.
-    cat > "$BIN_DIR/circleci" <<'EOF'
+    # Stub for `env subst <value>`: none of these tests feed pipeline value
+    # templates through the parameters, so it just echoes its argument back,
+    # matching env subst's behavior on plain strings. The script under test
+    # never looks this up on PATH — it calls it via $CIRCLECI_CLI, set below
+    # to this stub's full path, the same way it calls /usr/bin/circleci in a
+    # real job.
+    cat > "$BIN_DIR/circleci-cli-stub" <<'EOF'
 #!/usr/bin/env bash
 if [ "$1" = "env" ] && [ "$2" = "subst" ]; then
     printf '%s' "$3"
@@ -28,7 +48,8 @@ if [ "$1" = "env" ] && [ "$2" = "subst" ]; then
 fi
 exit 1
 EOF
-    chmod +x "$BIN_DIR/circleci"
+    chmod +x "$BIN_DIR/circleci-cli-stub"
+    export CIRCLECI_CLI="$BIN_DIR/circleci-cli-stub"
 
     export PATH="$BIN_DIR:$PATH"
 
@@ -56,6 +77,13 @@ EOF
     export PARAM_HALT_IF_MISSING="true"
 }
 
+# Undo setup(): restore the original $PATH and remove the temp fixture
+# directory (repo, bare remote, stub bins, $BASH_ENV, $HALT_LOG).
+#
+# Arguments: none (bats-core calls this automatically after each @test).
+# Returns: 0 (the trailing `|| true` on the `cd` guards against a removed
+#   cwd from failing teardown itself).
+# Side effects: restores $PATH; deletes $TEST_DIR and everything under it.
 teardown() {
     cd / || true
     export PATH="$ORIG_PATH"
