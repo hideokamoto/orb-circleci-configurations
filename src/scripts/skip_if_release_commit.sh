@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# The base_pinned/cimg-family executors this orb targets do not ship the
+# `circleci` CLI on PATH; the build-agent CLI CircleCI injects into every
+# job lives at the full path /usr/bin/circleci (see the fix already
+# applied to test-deploy's build-agent check). Call it by full path here
+# too, rather than relying on PATH resolution. CIRCLECI_CLI is
+# overridable so bats-core tests can point it at a stub.
+CIRCLECI_CLI="${CIRCLECI_CLI:-/usr/bin/circleci}"
+
 # Halt the current job when the current commit is a release-please version
 # bump commit, or when the commit message carries an explicit CI-skip
 # marker. Must run after `checkout`.
@@ -17,11 +25,14 @@ set -euo pipefail
 # Globals (read):
 #   PARAM_RELEASE_SUBJECT_REGEX - grep -E pattern matched against the commit
 #                                 subject only (orb parameter release_subject_regex,
-#                                 passed through `circleci env subst`).
+#                                 passed through `$CIRCLECI_CLI env subst`).
 #   PARAM_SKIP_CI_REGEX         - grep -E pattern matched against the full
 #                                 commit message body (orb parameter
 #                                 skip_ci_regex, passed through
-#                                 `circleci env subst`).
+#                                 `$CIRCLECI_CLI env subst`).
+#   CIRCLECI_CLI                - full path (or bats stub) of the circleci
+#                                 CLI binary; defaults to /usr/bin/circleci,
+#                                 set once at the top of this file.
 # Arguments:
 #   None.
 # Outputs:
@@ -35,8 +46,8 @@ set -euo pipefail
 main() {
     local release_subject_regex skip_ci_regex commit_subject commit_message
 
-    release_subject_regex="$(circleci env subst "${PARAM_RELEASE_SUBJECT_REGEX}")"
-    skip_ci_regex="$(circleci env subst "${PARAM_SKIP_CI_REGEX}")"
+    release_subject_regex="$("${CIRCLECI_CLI}" env subst "${PARAM_RELEASE_SUBJECT_REGEX}")"
+    skip_ci_regex="$("${CIRCLECI_CLI}" env subst "${PARAM_SKIP_CI_REGEX}")"
 
     commit_subject="$(git log -1 --pretty=%s)"
     if echo "${commit_subject}" | grep -qE "${release_subject_regex}"; then

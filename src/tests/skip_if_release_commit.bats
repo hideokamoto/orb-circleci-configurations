@@ -7,12 +7,15 @@
 #   - an ordinary commit does not halt at all
 
 # Prepares an isolated fixture for one test case: resolves the script
-# under test, creates a scratch directory holding a PATH-stubbed
+# under test, creates a scratch directory holding a stubbed
 # `circleci-agent` (that appends its arguments to a halt log instead of
-# actually halting anything) and a fresh git repo, and exports the two
-# orb parameters as the PARAM_* env vars the script reads. The real
-# `circleci` CLI's `env subst` is used as-is (it is side-effect free), so
-# it is not stubbed.
+# actually halting anything) and a stubbed `circleci` CLI (that
+# implements just enough of `env subst` for the script under test) and a
+# fresh git repo, and exports the two orb parameters as the PARAM_* env
+# vars the script reads. Both stubs are pointed to via env vars
+# (CIRCLECI_CLI) or PATH (circleci-agent) rather than relying on either
+# binary's real installed location, since production only guarantees the
+# circleci CLI at the full path /usr/bin/circleci.
 # Arguments:
 #   None (bats-core calls this automatically before every @test).
 # Outputs:
@@ -22,8 +25,9 @@
 # Side effects:
 #   Creates REPO_ROOT/SCRIPT/TEST_DIR/STUB_BIN/HALT_LOG/REPO globals for
 #   the test body to use; prepends STUB_BIN to PATH; exports
-#   PARAM_RELEASE_SUBJECT_REGEX and PARAM_SKIP_CI_REGEX; writes files
-#   under TEST_DIR (a mktemp -d directory) and initializes a git repo.
+#   PARAM_RELEASE_SUBJECT_REGEX, PARAM_SKIP_CI_REGEX and CIRCLECI_CLI;
+#   writes files under TEST_DIR (a mktemp -d directory) and initializes a
+#   git repo.
 setup() {
     REPO_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/../.." && pwd)"
     SCRIPT="${REPO_ROOT}/src/scripts/skip_if_release_commit.sh"
@@ -35,8 +39,6 @@ setup() {
     HALT_LOG="${TEST_DIR}/halt.log"
     : >"${HALT_LOG}"
 
-    # Real `circleci env subst` is available and side-effect free, so it is
-    # exercised as-is rather than stubbed.
     cat >"${STUB_BIN}/circleci-agent" <<EOF
 #!/usr/bin/env bash
 echo "\$*" >>"${HALT_LOG}"
@@ -44,7 +46,23 @@ exit 0
 EOF
     chmod +x "${STUB_BIN}/circleci-agent"
 
+    # Stub for the circleci CLI: the script under test only ever calls
+    # `$CIRCLECI_CLI env subst <string>`, so implement just that as a
+    # passthrough (none of the default regex parameters contain `$`
+    # references for env subst to actually substitute).
+    cat >"${STUB_BIN}/circleci" <<'EOF'
+#!/usr/bin/env bash
+if [ "$1" = "env" ] && [ "$2" = "subst" ]; then
+    printf '%s' "$3"
+    exit 0
+fi
+echo "circleci stub: unsupported invocation: $*" >&2
+exit 1
+EOF
+    chmod +x "${STUB_BIN}/circleci"
+
     PATH="${STUB_BIN}:${PATH}"
+    CIRCLECI_CLI="${STUB_BIN}/circleci"
 
     REPO="${TEST_DIR}/repo"
     mkdir -p "${REPO}"
@@ -54,6 +72,7 @@ EOF
 
     export PARAM_RELEASE_SUBJECT_REGEX='^chore(\([^)]+\))?: release'
     export PARAM_SKIP_CI_REGEX='\[skip ci\]|\[ci skip\]|circleci\[skip\]|circleci:skip'
+    export CIRCLECI_CLI
 }
 
 # Removes the per-test scratch directory (fixture repo, stub bin, halt
