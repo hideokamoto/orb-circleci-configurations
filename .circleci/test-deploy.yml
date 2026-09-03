@@ -49,6 +49,55 @@ jobs:
       - run:
           name: Confirm trivy resolves to a working Trivy image
           command: trivy --version
+  # Exercises the create_github_release command end-to-end without ever
+  # creating a real GitHub Release: a `gh` stub is installed at the front
+  # of PATH before the command runs, so `gh release view` / `gh release
+  # create` never leave this job. RELEASE_TAG is set at the job level so
+  # the command's default tag_env (RELEASE_TAG) resolves it; no
+  # RELEASE_NOTES_SOURCE / PREV_RELEASE_TAG is set, so this drives the
+  # command's first-release branch (--generate-notes, no start tag).
+  # skip_if_exists's halt path and the two other release-notes branches
+  # are covered by src/tests/create_github_release.bats.
+  test_create_github_release:
+    executor: configurations/base_pinned
+    environment:
+      RELEASE_TAG: "2026.09.03-0000000"
+    steps:
+      - checkout
+      - run:
+          name: Install a gh stub ahead of PATH (no real Release is ever created)
+          command: |
+            mkdir -p /tmp/gh-stub-bin
+            {
+              echo '#!/usr/bin/env bash'
+              echo 'if [ "$1" = "release" ] && [ "$2" = "view" ]; then'
+              echo '  echo "gh stub: release view $3 -> not found" >&2'
+              echo '  exit 1'
+              echo 'fi'
+              echo 'if [ "$1" = "release" ] && [ "$2" = "create" ]; then'
+              echo '  echo "gh stub: release create called with: $*" >&2'
+              echo '  echo "$*" > /tmp/gh-release-create-args'
+              echo '  exit 0'
+              echo 'fi'
+              echo 'echo "gh stub: unexpected invocation: $*" >&2'
+              echo 'exit 1'
+            } > /tmp/gh-stub-bin/gh
+            chmod +x /tmp/gh-stub-bin/gh
+            echo 'export PATH="/tmp/gh-stub-bin:$PATH"' >> "$BASH_ENV"
+      - run:
+          name: Confirm the stubbed gh (not a real gh binary) is first on PATH
+          command: |
+            command -v gh
+            [ "$(command -v gh)" = "/tmp/gh-stub-bin/gh" ]
+      - configurations/create_github_release:
+          skip_if_exists: false
+      - run:
+          name: Assert the stub recorded a first-release "gh release create --generate-notes"
+          command: |
+            test -f /tmp/gh-release-create-args
+            grep -q -- '--generate-notes' /tmp/gh-release-create-args
+            ! grep -q -- '--notes-start-tag' /tmp/gh-release-create-args
+            ! grep -q -- '--notes-file' /tmp/gh-release-create-args
 workflows:
   test-deploy:
     jobs:
@@ -57,6 +106,8 @@ workflows:
       - test_base_pinned_executor:
           filters: *filters
       - test_trivy_executor:
+          filters: *filters
+      - test_create_github_release:
           filters: *filters
       # The orb must be re-packed for publishing, and saved to the workspace.
       - orb-tools/pack:
@@ -70,5 +121,6 @@ workflows:
             - orb-tools/pack
             - test_base_pinned_executor
             - test_trivy_executor
+            - test_create_github_release
           context: orb-publishing
           filters: *release-filters
