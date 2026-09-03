@@ -5,6 +5,8 @@ orbs:
   orb-tools: circleci/orb-tools@12.3
   # The orb definition is intentionally not included here. It will be injected into the pipeline.
   configurations: {}
+  # Executor for test_install_cdkd (install_cdkd's command-test job).
+  node: circleci/node@7.2.1
 
 # Use this tag to ensure test jobs always run,
 # even though the downstream publish job will only run on release tags.
@@ -39,6 +41,19 @@ jobs:
       - run:
           name: Confirm trivy resolves to a working Trivy image
           command: trivy --version
+  # Command-test for install_cdkd: run it with its default (pinned) version
+  # and assert `cdkd --version` reports exactly that version.
+  test_install_cdkd:
+    executor:
+      name: node/default
+      tag: "22.14"
+    steps:
+      - configurations/install_cdkd:
+          version: "0.280.15"
+      - run:
+          name: Assert cdkd --version reports the pinned version
+          command: |
+            cdkd --version | grep -qF "0.280.15"
 workflows:
   test-deploy:
     jobs:
@@ -47,6 +62,8 @@ workflows:
       - test_base_pinned_executor:
           filters: *filters
       - test_trivy_executor:
+          filters: *filters
+      - test_install_cdkd:
           filters: *filters
       # The orb must be re-packed for publishing, and saved to the workspace.
       - orb-tools/pack:
@@ -60,5 +77,6 @@ workflows:
             - orb-tools/pack
             - test_base_pinned_executor
             - test_trivy_executor
+            - test_install_cdkd
           context: orb-publishing
           filters: *release-filters
