@@ -1,0 +1,52 @@
+description: >
+  Send a CycloneDX SBOM (e.g. produced by `trivy fs --format cyclonedx`) to a
+  Port.io webhook data source ingest URL via HTTP POST, so Port can catalog
+  sbomComponent / sbomVulnerability entities without reading files from
+  GitHub. Migrated from the "Send SBOM to Port webhook" step in
+  workflows/security/sbom-port.yaml, which chose the webhook ingest path
+  because Port's GitHub File ingesting only reads files already committed to
+  a repository, and a CI-generated SBOM is never committed. Fails fast (exit
+  1) when the webhook URL environment variable is unset or empty, so a
+  missing/misconfigured context secret cannot silently skip SBOM ingestion.
+  curl is installed on demand because the aquasec/trivy image this command
+  is meant to run inside is alpine-based and does not ship curl by default.
+
+parameters:
+  webhook_url_env:
+    type: env_var_name
+    default: PORT_WEBHOOK_INGEST_URL
+    description: >
+      Name of the environment variable holding the Port webhook ingest URL
+      (expected to be set via a "port" context, matching the source
+      workflow). The command exits 1 with a clear message if this variable
+      is unset or empty at run time.
+  sbom_file:
+    type: string
+    default: sbom.cdx.json
+    description: >
+      Path to the CycloneDX SBOM JSON file to send as the request body
+      (via curl --data-binary @<file>). May reference other environment
+      variables (e.g. "$SBOM_DIR/sbom.cdx.json"); they are expanded with
+      `circleci env subst`.
+  retries:
+    type: integer
+    default: 3
+    description: >
+      Number of times curl retries the POST on transient failure
+      (curl --retry).
+  max_time:
+    type: integer
+    default: 60
+    description: >
+      Maximum total number of seconds curl may spend on the request,
+      including retries (curl --max-time).
+
+steps:
+  - run:
+      name: Send SBOM to Port webhook
+      environment:
+        PARAM_WEBHOOK_URL_ENV: <<parameters.webhook_url_env>>
+        PARAM_SBOM_FILE: <<parameters.sbom_file>>
+        PARAM_RETRIES: <<parameters.retries>>
+        PARAM_MAX_TIME: <<parameters.max_time>>
+      command: <<include(scripts/send_sbom_to_port.sh)>>
