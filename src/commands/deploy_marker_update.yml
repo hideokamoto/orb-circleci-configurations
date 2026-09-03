@@ -1,0 +1,68 @@
+description: >
+  Updates a CircleCI Deploys "release" marker's status by calling the
+  build-agent CLI's `run release update` subcommand. Used internally by
+  with_deploy_marker for the RUNNING/SUCCESS/FAILED transitions, and
+  standalone by jobs that need to resolve a marker outside a
+  with_deploy_marker-wrapped deploy job -- most notably a deploy
+  cancellation job, which recomputes the same
+  "<component_name>-$CIRCLE_WORKFLOW_ID" DEPLOY_NAME formula in a separate
+  job/container and therefore cannot rely on $BASH_ENV exports from the job
+  that ran with_deploy_marker.
+
+  Always invokes /usr/bin/circleci rather than a bare `circleci` (see the
+  $DEPLOY_MARKER_CLI override below): the `release` subcommand lives only in
+  the build-agent CLI baked into the execution environment at that path.
+  cimg/* images additionally ship a *local* circleci CLI earlier on PATH
+  (used for `circleci config validate` and similar), which has no `release`
+  plugin -- an unqualified `circleci run release ...` would resolve to that
+  shadowing binary and fail. The script reads its CLI path from the
+  DEPLOY_MARKER_CLI environment variable, defaulting to /usr/bin/circleci,
+  so BATS tests can point it at a stub instead of calling the real CLI.
+
+parameters:
+  component_name:
+    type: string
+    default: ""
+    description: >
+      The CircleCI Deploys component name used to derive DEPLOY_NAME as
+      "<component_name>-$CIRCLE_WORKFLOW_ID". Empty resolves, in order, to
+      the $DEPLOY_COMPONENT_NAME environment variable and then to
+      $CIRCLE_PROJECT_REPONAME -- the same precedence with_deploy_marker
+      uses, so a standalone call (e.g. from a cancellation job) agrees on
+      the same marker identity. Ignored if DEPLOY_NAME is already exported
+      in this job (e.g. by a preceding with_deploy_marker call).
+  status:
+    type: enum
+    enum: ["RUNNING", "SUCCESS", "FAILED", "CANCELED"]
+    description: The release marker status to record.
+  failure_reason:
+    type: string
+    default: ""
+    description: >
+      Failure detail attached when status is FAILED, truncated to 500
+      characters before being sent. Empty falls back to the
+      $FAILURE_REASON environment variable (set by a preceding deploy step
+      on failure) and then to the literal "Deployment failed". Ignored for
+      any status other than FAILED.
+  tolerate_missing:
+    type: boolean
+    default: false
+    description: >
+      When true, a failing marker update (e.g. the marker was already
+      resolved by a racing step, or no release was ever planned for this
+      workflow) is logged and swallowed instead of failing this step.
+      Mirrors the current cancel-deploy job, which runs on
+      requires: [deploy-production: [canceled, failed]] and must tolerate
+      the marker having already been resolved to FAILED by the deploy job's
+      own on_fail step.
+
+steps:
+  - run:
+      name: Update deploy marker
+      environment:
+        PARAM_ACTION: update
+        PARAM_COMPONENT_NAME: <<parameters.component_name>>
+        PARAM_STATUS: <<parameters.status>>
+        PARAM_FAILURE_REASON: <<parameters.failure_reason>>
+        PARAM_TOLERATE_MISSING: <<parameters.tolerate_missing>>
+      command: <<include(scripts/deploy_marker.sh)>>

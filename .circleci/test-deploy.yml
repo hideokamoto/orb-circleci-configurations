@@ -49,6 +49,24 @@ jobs:
       - run:
           name: Confirm trivy resolves to a working Trivy image
           command: trivy --version
+  # Exercises with_deploy_marker end to end: plan -> RUNNING -> steps ->
+  # SUCCESS against a real "orb-test" component in the "ci-validation"
+  # environment. This does create a real deploy marker in this orb repo's
+  # own CircleCI Deploys history, same as the source repo's own CI does for
+  # its production deploys -- there is no side-effect-free way to exercise
+  # `circleci run release ...` itself, so the wrapped step is a harmless
+  # echo instead of a real deployment.
+  test_with_deploy_marker:
+    executor: configurations/base_pinned
+    steps:
+      - checkout
+      - configurations/with_deploy_marker:
+          environment_name: ci-validation
+          component_name: orb-test
+          steps:
+            - run:
+                name: Simulated deploy
+                command: echo "deploying orb-test to ci-validation"
 workflows:
   test-deploy:
     jobs:
@@ -57,6 +75,8 @@ workflows:
       - test_base_pinned_executor:
           filters: *filters
       - test_trivy_executor:
+          filters: *filters
+      - test_with_deploy_marker:
           filters: *filters
       # The orb must be re-packed for publishing, and saved to the workspace.
       - orb-tools/pack:
@@ -70,5 +90,6 @@ workflows:
             - orb-tools/pack
             - test_base_pinned_executor
             - test_trivy_executor
+            - test_with_deploy_marker
           context: orb-publishing
           filters: *release-filters
