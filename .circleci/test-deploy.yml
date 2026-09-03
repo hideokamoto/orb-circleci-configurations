@@ -30,8 +30,18 @@ jobs:
           name: Confirm base_pinned resolves to a cimg/base image
           command: cat /etc/os-release | head -2
       - run:
-          name: Confirm the CircleCI CLI is present on the base image
-          command: command -v circleci
+          # cimg/base does not ship the `circleci` CLI on PATH. What the
+          # deploy-marker commands actually depend on is the build-agent
+          # CLI CircleCI injects into every job at /usr/bin/circleci (see
+          # the migration source's .circleci/continue-config.yml and
+          # workflows/deployment/cloudflare-workers.yaml, both of which
+          # call it by full path on cimg-family images in production).
+          # Check that full path instead of PATH resolution, plus a
+          # baseline tool (git) that base_pinned jobs also rely on.
+          name: Confirm build-agent circleci CLI and git are present
+          command: |
+            test -x /usr/bin/circleci
+            git --version
   test_trivy_executor:
     executor: configurations/trivy
     steps:

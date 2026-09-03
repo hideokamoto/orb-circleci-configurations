@@ -76,8 +76,8 @@ Before opening a PR, run the same checks CI runs, from the repository root:
 circleci orb pack src > /tmp/orb.yml
 circleci orb validate /tmp/orb.yml --skip-update-check
 
-# Lint shell scripts backing commands
-shellcheck src/scripts/*.sh
+# Lint shell scripts backing commands (skips cleanly when none exist yet)
+if compgen -G 'src/scripts/*.sh' > /dev/null; then shellcheck src/scripts/*.sh; fi
 
 # Run BATS unit tests
 bats src/tests
