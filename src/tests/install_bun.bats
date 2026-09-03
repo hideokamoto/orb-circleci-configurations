@@ -12,6 +12,21 @@
 # its `env subst` just expands the given string, enough for the plain
 # version strings used here.
 
+# bats setup hook, run before every @test in this file.
+#
+# Arguments:
+#   None.
+# Returns:
+#   0, unless one of its own commands fails (bats then fails the test).
+# Side effects:
+#   Creates a fresh TEST_TMP scratch directory containing an isolated
+#   $HOME and a $STUB_BIN dir prepended to PATH. Writes stub `curl` and
+#   `circleci` executables into $STUB_BIN (the latter exported as
+#   CIRCLECI_CLI, since install_bun.sh calls the CLI by full path rather
+#   than via PATH). Points $BASH_ENV and $CURL_CALL_LOG at empty files
+#   under TEST_TMP, and sets REPO_ROOT/SCRIPT to locate the script under
+#   test. Exports HOME, BASH_ENV, CURL_CALL_LOG, CIRCLECI_CLI and PATH for
+#   the test body and any subprocess it `run`s.
 setup() {
   REPO_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/../.." && pwd)"
   SCRIPT="${REPO_ROOT}/src/scripts/install_bun.sh"
@@ -64,6 +79,15 @@ CIRCLECI_STUB
   export PATH="${STUB_BIN}:${PATH}"
 }
 
+# bats teardown hook, run after every @test in this file.
+#
+# Arguments:
+#   None.
+# Returns:
+#   0 (rm -rf on a directory this file itself created).
+# Side effects:
+#   Recursively deletes TEST_TMP (the fake $HOME, stub bin dir, and log
+#   files created by setup()), leaving no state behind between tests.
 teardown() {
   rm -rf "${TEST_TMP}"
 }
