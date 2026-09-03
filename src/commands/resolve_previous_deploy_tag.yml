@@ -22,6 +22,17 @@ description: >
   tag exists, so nothing is exported and downstream steps must treat the
   variable as optional.
 
+  Deliberate deviation from the migration source: the walk uses `git log
+  --pretty=tformat:'%H'`, not `--pretty=format:'%H'`. `format:` does not
+  terminate its final output line with a newline, so when the true previous
+  release tag sits on the walk's oldest (last-enumerated) ancestor, the
+  `while read` loop's final read returns a non-zero status even though it
+  populated the commit hash, causing the loop to exit before ever running
+  its body for that commit — silently reporting "no previous release" even
+  though one exists. `tformat:` is otherwise identical but appends a newline
+  after every entry including the last, which fixes that false negative
+  without changing the rest of the algorithm.
+
 parameters:
   tag_regex:
     type: string

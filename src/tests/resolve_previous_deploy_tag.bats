@@ -4,14 +4,17 @@
 # `--sort=-creatordate` would pick the wrong one, must find none on a first
 # release, and must walk correctly through a merge commit.
 #
-# Note on fixture shape: `git log --pretty=format:'%H'` (used unmodified
-# from the migration source) does not terminate its final line with a
-# newline, so `while IFS= read -r sha` silently drops the walk's very last
-# (oldest) ancestor. This is a pre-existing characteristic of the migrated
-# script, left unchanged per the migration contract; see the PR description
-# and final report for detail. Every fixture below therefore keeps an extra,
-# untagged root commit ahead of whichever commit carries the tag under test,
-# so the tag being asserted on is never the dropped last line.
+# Note on fixture shape: `git log --pretty=format:'%H'` (as used by the
+# unmodified migration source) does not terminate its final output line
+# with a newline, so `while IFS= read -r sha` silently drops the walk's very
+# last (oldest) ancestor. The script deliberately deviates from the source
+# here by using `--pretty=tformat:'%H'` instead, which fixes that false
+# negative (see the command description and PR description for detail); the
+# "tag on the walk's oldest ancestor" test below exists specifically to
+# pin that fix. Every *other* fixture still keeps an extra, untagged root
+# commit ahead of whichever commit carries the tag under test, purely so
+# those tests stay focused on what they're each named for rather than
+# incidentally depending on this fix too.
 
 # Runs before every @test. Builds an isolated scratch git repository (so
 # tests never touch this orb repo's own history), points CIRCLECI_CLI at a
@@ -131,6 +134,26 @@ make_commit() {
     [ "$status" -eq 0 ]
 
     grep -qx 'export PREV_RELEASE_TAG="2026.04.01-2000000"' "${BASH_ENV}"
+}
+
+@test "previous release tag is on the walk's oldest (last-enumerated) ancestor" {
+    # No untagged root commit here, deliberately: c1 is both the tag under
+    # test AND the very last line `git log --pretty=...:'%H'` emits for
+    # this history, which is exactly the line `format:` leaves without a
+    # trailing newline. Before the tformat: fix, `while read` would drop
+    # this commit's loop iteration and this test would fail with no
+    # PREV_RELEASE_TAG exported at all.
+    make_commit "c1"
+    git tag "2026.08.01-c1c1c1c" # the true previous release, and the oldest commit
+    make_commit "c2"
+    git tag "2026.08.01-c2c2c2c" # current release
+    export RELEASE_TAG="2026.08.01-c2c2c2c"
+
+    source "${SCRIPT}"
+    run main
+    [ "$status" -eq 0 ]
+
+    grep -qx 'export PREV_RELEASE_TAG="2026.08.01-c1c1c1c"' "${BASH_ENV}"
 }
 
 @test "first release: no matching ancestor tag, nothing is exported" {

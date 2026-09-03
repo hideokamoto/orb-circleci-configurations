@@ -44,7 +44,18 @@ main() {
     # release tag itself is the previous release. `|| true` absorbs the
     # pipefail-driven non-zero status from the `while read` loop hitting EOF
     # when no match is found (see command description for detail).
-    prev_tag="$(git log --pretty=format:'%H' "${release_commit}" \
+    #
+    # Deliberate deviation from the migration source: this uses
+    # `--pretty=tformat:'%H'`, not `--pretty=format:'%H'`. `format:` does not
+    # terminate its last output line with a newline, so when the true
+    # previous release tag sits on the walk's final (oldest) ancestor,
+    # `read`'s last call returns a non-zero status even though it populated
+    # `sha` — which makes `while` exit before ever running the loop body for
+    # that commit, silently reporting "no previous release" instead.
+    # `tformat:` is otherwise identical but appends a newline after every
+    # entry including the last, so this fixes that false negative without
+    # changing anything else about the walk.
+    prev_tag="$(git log --pretty=tformat:'%H' "${release_commit}" \
         | while IFS= read -r sha; do
             git tag --points-at "${sha}" \
                 | grep -E "${tag_regex}" \
