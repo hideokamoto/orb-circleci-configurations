@@ -1,0 +1,84 @@
+description: >
+  Wraps a deployment in a CircleCI Deploys "release" marker: plans the
+  release, marks it RUNNING, runs the given steps, then resolves the marker
+  to SUCCESS (on_success) or FAILED (on_fail) depending on the outcome.
+  Consolidates six duplicated "Set deploy marker name -> Plan deployment ->
+  RUNNING -> ... -> SUCCESS / FAILED" step sequences that previously lived
+  inline in five Cloudflare Workers deploy jobs and
+  .circleci/continue-config.yml, so the marker lifecycle only needs to be
+  gotten right once.
+
+  DEPLOY_COMPONENT_NAME and DEPLOY_NAME are exported to $BASH_ENV once
+  resolved, so later steps in the same job -- and a separate job that
+  recomputes the same "<component>-$CIRCLE_WORKFLOW_ID" formula via the
+  deploy_marker_update command, such as a deploy-cancellation job -- agree
+  on the same marker identity without either command needing to know about
+  the other job.
+
+  The build-agent CLI is always invoked by its full path
+  (/usr/bin/circleci), never a bare `circleci`: see the deploy_marker_update
+  command's description for why. tolerate_missing is not exposed here --
+  the RUNNING/SUCCESS/FAILED transitions this command drives must not
+  silently swallow a failure; only a standalone deploy_marker_update call
+  (e.g. from a cancellation job) needs to tolerate one.
+
+parameters:
+  environment_name:
+    type: string
+    default: "production"
+    description: >
+      The CircleCI Deploys environment name to plan and record this release
+      against (e.g. "production", "staging", "ci-validation").
+  component_name:
+    type: string
+    default: ""
+    description: >
+      The CircleCI Deploys component name. Empty resolves, in order, to the
+      $DEPLOY_COMPONENT_NAME environment variable (settable at the CircleCI
+      Project or Context level to override the default without editing
+      config) and then to $CIRCLE_PROJECT_REPONAME.
+  target_version:
+    type: string
+    default: ""
+    description: >
+      The version string recorded on the release marker. Empty resolves to
+      $CIRCLE_SHA1.
+  steps:
+    type: steps
+    description: >
+      The deployment steps to run between the RUNNING and SUCCESS/FAILED
+      marker updates.
+
+steps:
+  - run:
+      name: Plan deployment (deploy marker)
+      environment:
+        PARAM_ACTION: plan
+        PARAM_ENVIRONMENT_NAME: <<parameters.environment_name>>
+        PARAM_COMPONENT_NAME: <<parameters.component_name>>
+        PARAM_TARGET_VERSION: <<parameters.target_version>>
+      command: <<include(scripts/deploy_marker.sh)>>
+  - run:
+      name: Update deploy marker to RUNNING
+      environment:
+        PARAM_ACTION: update
+        PARAM_COMPONENT_NAME: <<parameters.component_name>>
+        PARAM_STATUS: RUNNING
+      command: <<include(scripts/deploy_marker.sh)>>
+  - <<parameters.steps>>
+  - run:
+      name: Update deploy marker to SUCCESS
+      environment:
+        PARAM_ACTION: update
+        PARAM_COMPONENT_NAME: <<parameters.component_name>>
+        PARAM_STATUS: SUCCESS
+      command: <<include(scripts/deploy_marker.sh)>>
+      when: on_success
+  - run:
+      name: Update deploy marker to FAILED
+      environment:
+        PARAM_ACTION: update
+        PARAM_COMPONENT_NAME: <<parameters.component_name>>
+        PARAM_STATUS: FAILED
+      command: <<include(scripts/deploy_marker.sh)>>
+      when: on_fail
