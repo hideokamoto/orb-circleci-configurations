@@ -1,0 +1,84 @@
+description: >
+  Builds a Deploy Diff Summaries API payload for a git revision range, posts
+  it to CircleCI's `deploy/diff-summaries` endpoint to generate release
+  notes, polls until the summary is ready, and writes it to a file for a
+  subsequent `gh release create --notes-file` step.
+
+  Ported from the "Generate release notes (Deploy Diff Summaries)" step of
+  the create-github-release job in hideokamoto/circleci-configurations
+  (workflows/deployment/cloudflare-workers.yaml), which previously kept an
+  inline copy of workflows/deployment/scripts/make-diff-summary-payload.sh
+  and fetch-deploy-diff-summary.sh in sync by hand. Both scripts now live
+  once, under src/scripts/, and are wired in as this command's two steps.
+
+  Requires the standalone CircleCI CLI (`circleci api ...`) on PATH — run
+  the install_circleci_cli command first.
+
+  Calls two different CircleCI CLIs on purpose: `circleci api ...` calls
+  use the standalone CLI on PATH (installed by install_circleci_cli, the
+  only one with an `api` subcommand), while `env subst` calls use the
+  build-agent CLI at the fixed path /usr/bin/circleci — present in every
+  job container regardless of PATH — since a bare `circleci env subst`
+  would otherwise resolve to whichever CLI PATH finds first.
+
+  Non-blocking by design: whenever the CircleCI project id, an API token,
+  the organization id, or the head revision cannot be resolved, or the API
+  call itself fails, times out, or returns an empty summary, this command
+  exports `RELEASE_NOTES_SOURCE=gh-generate-notes` and exits 0 instead of
+  failing the job, so a downstream release-creation step can fall back to
+  `gh release create --generate-notes`. On success it exports
+  `RELEASE_NOTES_SOURCE=deploy-diff-summaries` and `RELEASE_NOTES_FILE`.
+
+parameters:
+  base_ref:
+    type: string
+    default: ""
+    description: >
+      Diff range start (git ref/tag/sha). Empty resolves to
+      $PREV_RELEASE_TAG (as exported by the resolve_previous_deploy_tag
+      command) when set, else the repository's root commit — there is
+      nothing earlier to diff against on a project's first release.
+  head_ref:
+    type: string
+    default: ""
+    description: >
+      Diff range end (git ref/tag/sha). Empty resolves to $RELEASE_TAG (as
+      exported by the resolve_deploy_tag command).
+  circle_token_env:
+    type: env_var_name
+    default: CIRCLE_TOKEN
+    description: >
+      Name of the environment variable holding a CircleCI Personal API
+      Token, used to authenticate the `circleci api` calls this command
+      makes against the Deploy Diff Summaries endpoint. A missing or empty
+      value triggers the gh-generate-notes fallback rather than failing the
+      job — add the token to a context (e.g. `circleci`) if it should be
+      used.
+  output_file:
+    type: string
+    default: /tmp/release-notes.md
+    description: File the generated release notes summary is written to on success.
+  max_polls:
+    type: integer
+    default: 30
+    description: Maximum number of times to poll deploy/diff-summaries/<id> for phase == ended before giving up and falling back.
+  poll_interval:
+    type: integer
+    default: 2
+    description: Seconds to sleep between polls of deploy/diff-summaries/<id>.
+
+steps:
+  - run:
+      name: Build Deploy Diff Summaries payload
+      environment:
+        PARAM_BASE_REF: <<parameters.base_ref>>
+        PARAM_HEAD_REF: <<parameters.head_ref>>
+        PARAM_CIRCLE_TOKEN_ENV: <<parameters.circle_token_env>>
+      command: <<include(scripts/make_diff_summary_payload.sh)>>
+  - run:
+      name: Fetch Deploy Diff Summary and write release notes
+      environment:
+        PARAM_OUTPUT_FILE: <<parameters.output_file>>
+        PARAM_MAX_POLLS: <<parameters.max_polls>>
+        PARAM_POLL_INTERVAL: <<parameters.poll_interval>>
+      command: <<include(scripts/fetch_deploy_diff_summary.sh)>>
