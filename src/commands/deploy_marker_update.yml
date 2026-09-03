@@ -10,13 +10,13 @@ description: >
   that ran with_deploy_marker.
 
   Always invokes /usr/bin/circleci rather than a bare `circleci` (see the
-  $DEPLOY_MARKER_CLI override below): the `release` subcommand lives only in
+  $CIRCLECI_CLI override below): the `release` subcommand lives only in
   the build-agent CLI baked into the execution environment at that path.
   cimg/* images additionally ship a *local* circleci CLI earlier on PATH
   (used for `circleci config validate` and similar), which has no `release`
   plugin -- an unqualified `circleci run release ...` would resolve to that
   shadowing binary and fail. The script reads its CLI path from the
-  DEPLOY_MARKER_CLI environment variable, defaulting to /usr/bin/circleci,
+  CIRCLECI_CLI environment variable, defaulting to /usr/bin/circleci,
   so BATS tests can point it at a stub instead of calling the real CLI.
 
 parameters:

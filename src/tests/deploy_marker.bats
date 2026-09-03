@@ -1,11 +1,11 @@
 #!/usr/bin/env bats
 # Covers src/scripts/deploy_marker.sh, the shared implementation behind the
 # with_deploy_marker and deploy_marker_update commands. All CircleCI Deploys
-# calls are made through a stubbed DEPLOY_MARKER_CLI so no real
+# calls are made through a stubbed CIRCLECI_CLI so no real
 # `circleci run release ...` call is ever attempted.
 
 # setup: bats-core per-test hook. Builds an isolated fixture for each test
-# case -- a temp $BASH_ENV file, a stubbed DEPLOY_MARKER_CLI binary (with a
+# case -- a temp $BASH_ENV file, a stubbed CIRCLECI_CLI binary (with a
 # calls.log the tests assert against), and a baseline CircleCI job
 # environment -- then sources deploy_marker.sh so its functions
 # (resolve_component_name, deploy_marker_plan, deploy_marker_update, main)
@@ -19,9 +19,9 @@
 #   own error handling, not a script return value).
 # Side effects:
 #   - Creates a temp file (BASH_ENV) and a temp directory (STUB_DIR)
-#     containing the DEPLOY_MARKER_CLI stub and CLI_CALL_LOG; neither is
+#     containing the CIRCLECI_CLI stub and CLI_CALL_LOG; neither is
 #     cleaned up here (see teardown).
-#   - Exports BASH_ENV, CLI_CALL_LOG, DEPLOY_MARKER_CLI, CIRCLE_PROJECT_REPONAME,
+#   - Exports BASH_ENV, CLI_CALL_LOG, CIRCLECI_CLI, CIRCLE_PROJECT_REPONAME,
 #     CIRCLE_WORKFLOW_ID and CIRCLE_SHA1 into the test process's environment.
 #   - Unsets DEPLOY_COMPONENT_NAME, DEPLOY_NAME, FAILURE_REASON and
 #     STUB_EXIT_CODE so ambient sandbox state can't leak into a test.
@@ -39,13 +39,13 @@ setup() {
   export CLI_CALL_LOG
   : > "$CLI_CALL_LOG"
 
-  DEPLOY_MARKER_CLI="$STUB_DIR/circleci-stub"
-  cat > "$DEPLOY_MARKER_CLI" <<'EOS'
+  CIRCLECI_CLI="$STUB_DIR/circleci-stub"
+  cat > "$CIRCLECI_CLI" <<'EOS'
 #!/usr/bin/env bash
 if [ "$1" = "env" ] && [ "$2" = "subst" ]; then
   # Mimic `circleci env subst`: expand $VAR / ${VAR} references in the
   # given string using the current environment. This lets tests exercise
-  # deploy_marker.sh end to end (it now calls "$DEPLOY_MARKER_CLI" env subst
+  # deploy_marker.sh end to end (it now calls "$CIRCLECI_CLI" env subst
   # for every string parameter -- see deploy_marker.sh's top-of-file
   # comment for why -- instead of a bare `circleci`) without depending on
   # the real CLI being installed.
@@ -55,8 +55,8 @@ fi
 echo "$@" >> "$CLI_CALL_LOG"
 exit "${STUB_EXIT_CODE:-0}"
 EOS
-  chmod +x "$DEPLOY_MARKER_CLI"
-  export DEPLOY_MARKER_CLI
+  chmod +x "$CIRCLECI_CLI"
+  export CIRCLECI_CLI
 
   # Isolate from any ambient CircleCI job env this sandbox happens to run in.
   unset DEPLOY_COMPONENT_NAME DEPLOY_NAME FAILURE_REASON STUB_EXIT_CODE || true
@@ -77,7 +77,7 @@ EOS
 # Returns:
 #   Always exits 0.
 # Side effects:
-#   Deletes the STUB_DIR directory (DEPLOY_MARKER_CLI stub + CLI_CALL_LOG)
+#   Deletes the STUB_DIR directory (CIRCLECI_CLI stub + CLI_CALL_LOG)
 #   and the BASH_ENV temp file that setup() created.
 teardown() {
   rm -rf "$STUB_DIR" "$BASH_ENV"
@@ -332,5 +332,5 @@ teardown() {
 # --- /usr/bin/circleci full-path invocation ----------------------------------
 
 @test "the build-agent CLI defaults to the full path /usr/bin/circleci" {
-  grep -q 'DEPLOY_MARKER_CLI:-/usr/bin/circleci' "$SCRIPT"
+  grep -q 'CIRCLECI_CLI:-/usr/bin/circleci' "$SCRIPT"
 }

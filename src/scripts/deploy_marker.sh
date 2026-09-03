@@ -12,9 +12,9 @@ set -euo pipefail
 # the job runner itself, exists there). We therefore call the build-agent
 # CLI by its full path everywhere in this script -- including for
 # `env subst`, so this script has no dependency on `circleci` being
-# resolvable via PATH on any executor. Tests point the DEPLOY_MARKER_CLI
+# resolvable via PATH on any executor. Tests point the CIRCLECI_CLI
 # environment variable at a stub so no real CLI call is made.
-DEPLOY_MARKER_CLI="${DEPLOY_MARKER_CLI:-/usr/bin/circleci}"
+CIRCLECI_CLI="${CIRCLECI_CLI:-/usr/bin/circleci}"
 
 # resolve_component_name: resolve the CircleCI Deploys component name from,
 # in order: an explicit value (the command parameter, already env-subst'd by
@@ -62,18 +62,18 @@ resolve_component_name() {
 #                                 (falls back to the literal "production")
 #   Also reads DEPLOY_COMPONENT_NAME, CIRCLE_PROJECT_REPONAME,
 #   CIRCLE_WORKFLOW_ID and CIRCLE_SHA1 from the ambient CircleCI job
-#   environment, and DEPLOY_MARKER_CLI for the build-agent CLI path.
+#   environment, and CIRCLECI_CLI for the build-agent CLI path.
 # Returns:
 #   The exit status of the underlying
-#   "$DEPLOY_MARKER_CLI run release plan ..." call.
+#   "$CIRCLECI_CLI run release plan ..." call.
 # Side effects:
 #   - Appends "export DEPLOY_COMPONENT_NAME=..." and
 #     "export DEPLOY_NAME=..." lines to $BASH_ENV.
-#   - Invokes $DEPLOY_MARKER_CLI twice for `env subst` (parameter
+#   - Invokes $CIRCLECI_CLI twice for `env subst` (parameter
 #     expansion) and once for `run release plan`.
 deploy_marker_plan() {
   local param_component_name
-  param_component_name="$("$DEPLOY_MARKER_CLI" env subst "${PARAM_COMPONENT_NAME:-}")"
+  param_component_name="$("$CIRCLECI_CLI" env subst "${PARAM_COMPONENT_NAME:-}")"
   local component_name
   component_name="$(resolve_component_name "$param_component_name")"
   local deploy_name="${component_name}-${CIRCLE_WORKFLOW_ID}"
@@ -82,13 +82,13 @@ deploy_marker_plan() {
   echo "export DEPLOY_NAME=\"${deploy_name}\"" >> "$BASH_ENV"
 
   local param_target_version
-  param_target_version="$("$DEPLOY_MARKER_CLI" env subst "${PARAM_TARGET_VERSION:-}")"
+  param_target_version="$("$CIRCLECI_CLI" env subst "${PARAM_TARGET_VERSION:-}")"
   local target_version="${param_target_version:-${CIRCLE_SHA1:-}}"
 
   local environment_name
-  environment_name="$("$DEPLOY_MARKER_CLI" env subst "${PARAM_ENVIRONMENT_NAME:-production}")"
+  environment_name="$("$CIRCLECI_CLI" env subst "${PARAM_ENVIRONMENT_NAME:-production}")"
 
-  "$DEPLOY_MARKER_CLI" run release plan "$deploy_name" \
+  "$CIRCLECI_CLI" run release plan "$deploy_name" \
     --environment-name="$environment_name" \
     --component-name="$component_name" \
     --target-version="$target_version"
@@ -117,20 +117,20 @@ deploy_marker_plan() {
 #   Also reads DEPLOY_NAME (if already exported by a preceding
 #   deploy_marker_plan call in the same job), DEPLOY_COMPONENT_NAME,
 #   CIRCLE_PROJECT_REPONAME, CIRCLE_WORKFLOW_ID and FAILURE_REASON from the
-#   ambient CircleCI job environment, and DEPLOY_MARKER_CLI for the
+#   ambient CircleCI job environment, and CIRCLECI_CLI for the
 #   build-agent CLI path.
 # Returns:
-#   0 if the underlying "$DEPLOY_MARKER_CLI run release update ..." call
+#   0 if the underlying "$CIRCLECI_CLI run release update ..." call
 #   succeeds, or if it fails and PARAM_TOLERATE_MISSING is "true" (the
 #   failure is logged and swallowed). 1 if it fails and
 #   PARAM_TOLERATE_MISSING is not "true".
 # Side effects:
-#   Invokes $DEPLOY_MARKER_CLI for `env subst` (when PARAM_STATUS=FAILED)
+#   Invokes $CIRCLECI_CLI for `env subst` (when PARAM_STATUS=FAILED)
 #   and once for `run release update`. Prints a message to stdout when a
 #   failure is tolerated.
 deploy_marker_update() {
   local param_component_name
-  param_component_name="$("$DEPLOY_MARKER_CLI" env subst "${PARAM_COMPONENT_NAME:-}")"
+  param_component_name="$("$CIRCLECI_CLI" env subst "${PARAM_COMPONENT_NAME:-}")"
   local component_name
   component_name="$(resolve_component_name "$param_component_name")"
   # Prefer an already-exported DEPLOY_NAME (set by deploy_marker_plan earlier
@@ -145,7 +145,7 @@ deploy_marker_update() {
 
   if [ "$status" = "FAILED" ]; then
     local param_failure_reason
-    param_failure_reason="$("$DEPLOY_MARKER_CLI" env subst "${PARAM_FAILURE_REASON:-}")"
+    param_failure_reason="$("$CIRCLECI_CLI" env subst "${PARAM_FAILURE_REASON:-}")"
     # Falls back to $FAILURE_REASON (set by a preceding deploy step on
     # failure) and then to a literal default, matching the source behavior
     # of "${FAILURE_REASON:-Deployment failed}".
@@ -156,7 +156,7 @@ deploy_marker_update() {
     args+=("--failure-reason=${reason}")
   fi
 
-  if "$DEPLOY_MARKER_CLI" "${args[@]}"; then
+  if "$CIRCLECI_CLI" "${args[@]}"; then
     return 0
   fi
 
