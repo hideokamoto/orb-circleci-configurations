@@ -5,6 +5,7 @@ orbs:
   orb-tools: circleci/orb-tools@12.3
   # The orb definition is intentionally not included here. It will be injected into the pipeline.
   configurations: {}
+  node: circleci/node@7.2.1
 
 # Use this tag to ensure test jobs always run,
 # even though the downstream publish job will only run on release tags.
@@ -39,6 +40,39 @@ jobs:
       - run:
           name: Confirm trivy resolves to a working Trivy image
           command: trivy --version
+  test_cdk_synth:
+    # No checkout: this job only exercises the command against a throwaway
+    # fixture, not the orb repo itself.
+    executor:
+      name: node/default
+      tag: "22.14"
+    working_directory: /tmp/cdk-synth-fixture
+    steps:
+      - run:
+          name: Write a minimal CDK-app-shaped fixture (synth script reports CDK_DEFAULT_* env)
+          command: |
+            mkdir -p /tmp/cdk-synth-fixture
+            cat > package.json \<<'PKGJSON'
+            {
+              "name": "cdk-synth-fixture",
+              "private": true,
+              "scripts": {
+                "synth": "env | grep '^CDK_DEFAULT_' | sort > synth-output.txt"
+              }
+            }
+            PKGJSON
+      - run:
+          name: Enable pnpm via corepack
+          command: corepack enable pnpm
+      - configurations/cdk_synth:
+          pkg_manager: pnpm
+          synth_script: synth
+      - run:
+          name: Confirm the account/region placeholders were applied
+          command: |
+            cat synth-output.txt
+            grep -qx 'CDK_DEFAULT_ACCOUNT=123456789012' synth-output.txt
+            grep -qx 'CDK_DEFAULT_REGION=us-east-1' synth-output.txt
 workflows:
   test-deploy:
     jobs:
@@ -47,6 +81,8 @@ workflows:
       - test_base_pinned_executor:
           filters: *filters
       - test_trivy_executor:
+          filters: *filters
+      - test_cdk_synth:
           filters: *filters
       # The orb must be re-packed for publishing, and saved to the workspace.
       - orb-tools/pack:
@@ -60,5 +96,6 @@ workflows:
             - orb-tools/pack
             - test_base_pinned_executor
             - test_trivy_executor
+            - test_cdk_synth
           context: orb-publishing
           filters: *release-filters
