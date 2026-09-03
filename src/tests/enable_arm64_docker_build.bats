@@ -1,12 +1,41 @@
 #!/usr/bin/env bats
 # Unit tests for scripts/enable_arm64_docker_build.sh.
 #
-# `docker` and `circleci` are stubbed via a PATH-prepended fixture
-# directory so the test never touches a real Docker daemon or performs a
-# real `circleci env subst` network round-trip. The docker stub records
-# every invocation (one line per call, space-joined args) to CALL_LOG so
-# tests can assert both the call order and the exact arguments used.
+# `docker` is stubbed via a PATH-prepended fixture directory so the test
+# never touches a real Docker daemon. The docker stub records every
+# invocation (one line per call, space-joined args) to CALL_LOG so tests
+# can assert both the call order and the exact arguments used.
+#
+# `circleci` is stubbed differently: the script under test never calls a
+# bare `circleci` (not every executor image, e.g. cimg/base, puts it on
+# PATH -- only /usr/bin/circleci is guaranteed there), so the stub lives
+# outside PATH and is wired in via the CIRCLECI_CLI environment variable
+# the script reads instead. Deliberately NOT adding it to PATH means a
+# regression back to a bare `circleci` call would hit the real CLI (which
+# is on PATH in this sandbox) rather than silently passing against the
+# stub.
 
+# bats-core setup hook, run before every @test in this file. Builds an
+# isolated fixture directory containing a PATH-prepended `docker` stub
+# (so the test never touches a real Docker daemon) and a `circleci` stub
+# wired in via CIRCLECI_CLI (not PATH -- see the file header comment),
+# points BASH_ENV at a scratch file the script under test can safely
+# append `export` lines to, and exports the default PARAM_* environment
+# the script reads its inputs from.
+# Arguments:
+#   None (bats-core calls this with no arguments before each test).
+# Returns:
+#   Implicit 0 (no explicit exit/return; a failing command here would
+#   abort the test via bats' own error handling).
+# Side effects:
+#   Creates a `mktemp -d` fixture directory (TEST_DIR) containing a
+#   bin/ subdirectory (PATH-prepended, docker stub only) and a separate
+#   circleci-stub/ subdirectory (not on PATH, referenced only via
+#   CIRCLECI_CLI) plus a bash_env scratch file; exports REPO_ROOT,
+#   SCRIPT, CALL_LOG, BASH_ENV, PATH (with the stub bin/ prepended),
+#   CIRCLECI_CLI, and the PARAM_BINFMT_IMAGE / PARAM_ALPINE_IMAGE /
+#   PARAM_BUILDER_NAME / PARAM_SMOKE_TEST variables into the test's
+#   environment.
 setup() {
   REPO_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/../.." && pwd)"
   SCRIPT="${REPO_ROOT}/src/scripts/enable_arm64_docker_build.sh"
@@ -46,10 +75,13 @@ exit 0
 EOF
   chmod +x "${STUB_BIN}/docker"
 
-  # circleci stub: `circleci env subst <string>` performs real shell
-  # variable substitution so parameter defaults (which contain no $VAR
-  # references in these tests) pass through unchanged.
-  cat > "${STUB_BIN}/circleci" <<'EOF'
+  # circleci stub, deliberately kept out of PATH (see header comment):
+  # `circleci env subst <string>` performs real shell variable
+  # substitution so parameter defaults/overrides resolve the same way
+  # the real CLI would.
+  CIRCLECI_STUB_DIR="${TEST_DIR}/circleci-stub"
+  mkdir -p "${CIRCLECI_STUB_DIR}"
+  cat > "${CIRCLECI_STUB_DIR}/circleci" <<'EOF'
 #!/usr/bin/env bash
 if [[ "$1" == "env" && "$2" == "subst" ]]; then
   eval "echo \"$3\""
@@ -57,7 +89,8 @@ if [[ "$1" == "env" && "$2" == "subst" ]]; then
 fi
 exit 1
 EOF
-  chmod +x "${STUB_BIN}/circleci"
+  chmod +x "${CIRCLECI_STUB_DIR}/circleci"
+  export CIRCLECI_CLI="${CIRCLECI_STUB_DIR}/circleci"
 
   export CALL_LOG
   export PATH="${STUB_BIN}:${PATH}"
@@ -68,6 +101,17 @@ EOF
   export PARAM_SMOKE_TEST="true"
 }
 
+# bats-core teardown hook, run after every @test in this file. Removes
+# the fixture directory setup() created, so stub binaries and the
+# BASH_ENV scratch file from one test never leak into the next.
+# Arguments:
+#   None (bats-core calls this with no arguments after each test).
+# Returns:
+#   Implicit 0.
+# Side effects:
+#   Recursively deletes TEST_DIR (and everything setup() put in it) from
+#   disk. Does not touch /tmp/cdk-docker, which individual tests that
+#   assert on it remove themselves.
 teardown() {
   rm -rf "${TEST_DIR}"
 }
