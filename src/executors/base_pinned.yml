@@ -1,0 +1,27 @@
+description: >
+  A digest-pinned cimg/base image for lightweight, non-language-specific
+  steps (deploy markers, release automation, cancellation jobs). The digest
+  is pinned instead of a mutable tag such as ":current" so that a run against
+  the same commit is reproducible: an unpinned ":current" tag can change
+  underneath a pipeline without any change to this repository, which makes
+  review results and CI outcomes non-deterministic over time.
+
+docker:
+  - image: "cimg/base@<<parameters.digest>>"
+
+resource_class: <<parameters.resource_class>>
+
+parameters:
+  digest:
+    type: string
+    default: "sha256:e8f07526f593ac5dee29362b7f98c6fec94c412722d6bbece731e4cc885abccb"
+    description: >
+      The cimg/base image digest to pin, in "sha256:<hex>" form. Corresponds
+      to tag cimg/base:2026.08 (a monthly snapshot). When updating, check
+      https://hub.docker.com/r/cimg/base/tags for the current monthly tag and
+      update the digest together with the tag reference in this description,
+      so the two never drift apart.
+  resource_class:
+    type: string
+    default: "small"
+    description: The resource class to run this executor's jobs on.

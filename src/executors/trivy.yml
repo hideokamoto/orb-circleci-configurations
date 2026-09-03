@@ -1,0 +1,32 @@
+description: >
+  A digest-pinned aquasec/trivy image for SBOM generation and vulnerability
+  scanning. The digest is pinned instead of a mutable tag for reproducibility,
+  matching the base_pinned executor's rationale. Before updating this image,
+  review current Aqua Security advisories — this image has a history of
+  supply-chain attacks against its tags (e.g. GHSA-69fq-xp46-6x23) — and only
+  then update the tag and digest together. To get the digest for a chosen
+  tag, run:
+  `docker inspect --format='{{index .RepoDigests 0}}' aquasec/trivy:<version>`.
+  Runs as root, so working_directory is set to /root/project instead of the
+  default /home/circleci/project.
+
+docker:
+  - image: "aquasec/trivy@<<parameters.digest>>"
+
+working_directory: /root/project
+
+resource_class: <<parameters.resource_class>>
+
+parameters:
+  digest:
+    type: string
+    default: "sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969"
+    description: >
+      The aquasec/trivy image digest to pin, in "sha256:<hex>" form.
+      Corresponds to tag 0.74.0. When updating, check Aqua Security's
+      advisories first, then update the tag and digest together using
+      `docker inspect --format='{{index .RepoDigests 0}}' aquasec/trivy:<version>`.
+  resource_class:
+    type: string
+    default: "small"
+    description: The resource class to run this executor's jobs on.
