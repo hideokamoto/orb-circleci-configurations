@@ -49,6 +49,23 @@ jobs:
       - run:
           name: Confirm trivy resolves to a working Trivy image
           command: trivy --version
+  test_install_bun:
+    # Exercises the install_bun command for real: no stubs, so this proves
+    # the command can actually reach bun.sh/install and produce the pinned
+    # version end to end (the mismatch/skip branches are covered by BATS).
+    executor: configurations/base_pinned
+    steps:
+      - checkout
+      - configurations/install_bun:
+          version: "1.3.14"
+      - run:
+          name: Confirm installed bun matches the pinned version
+          command: |
+            ACTUAL="$(bun --version)"
+            if [ "$ACTUAL" != "1.3.14" ]; then
+              echo "Expected bun 1.3.14, got ${ACTUAL}"
+              exit 1
+            fi
 workflows:
   test-deploy:
     jobs:
@@ -57,6 +74,8 @@ workflows:
       - test_base_pinned_executor:
           filters: *filters
       - test_trivy_executor:
+          filters: *filters
+      - test_install_bun:
           filters: *filters
       # The orb must be re-packed for publishing, and saved to the workspace.
       - orb-tools/pack:
@@ -70,5 +89,6 @@ workflows:
             - orb-tools/pack
             - test_base_pinned_executor
             - test_trivy_executor
+            - test_install_bun
           context: orb-publishing
           filters: *release-filters
