@@ -6,6 +6,18 @@
 PAYLOAD_SCRIPT="${BATS_TEST_DIRNAME}/../scripts/make_diff_summary_payload.sh"
 FETCH_SCRIPT="${BATS_TEST_DIRNAME}/../scripts/fetch_deploy_diff_summary.sh"
 
+# bats-core lifecycle hook, run before every @test in this file. Creates an
+# isolated temp git repo and a PATH-stubbed `circleci` CLI, and points
+# $BASH_ENV at a scratch file so tests can assert on the exports the
+# scripts under test append to it.
+# Args:
+#   None (bats lifecycle hook — no arguments).
+# Side effects:
+#   Creates $TEST_DIR/$BIN_DIR/$REPO_DIR, cd's into $REPO_DIR and git-inits
+#   it, exports BASH_ENV/CIRCLE_PROJECT_ID/CIRCLE_ORGANIZATION_ID/
+#   CIRCLE_TOKEN/PARAM_CIRCLE_TOKEN_ENV, unsets the RELEASE_*/PARAM_* vars
+#   the scripts under test read, and writes an executable `circleci` stub
+#   onto the front of PATH.
 setup() {
   TEST_DIR="$(mktemp -d)"
   BIN_DIR="${TEST_DIR}/bin"
@@ -71,11 +83,24 @@ STUB
   chmod +x "${BIN_DIR}/circleci"
 }
 
+# bats-core lifecycle hook, run after every @test in this file.
+# Args:
+#   None (bats lifecycle hook — no arguments).
+# Side effects:
+#   cd's back to / and removes $TEST_DIR (and everything setup() created
+#   under it) recursively.
 teardown() {
   cd /
   rm -rf "$TEST_DIR"
 }
 
+# Test helper: writes content to a file in the current test repo and commits
+# it, so tests can build up a small git history to diff against.
+# Args:
+#   $1 - path    - file path (relative to the repo root) to write.
+#   $2 - content - file content to write (no trailing newline is added).
+# Side effects:
+#   Creates/overwrites the file at $1, `git add`s it, and commits it.
 commit_file() {
   # commit_file <path> <content> -- writes content and commits it.
   printf '%s' "$2" > "$1"
@@ -121,6 +146,17 @@ line two
   # call only, and delegating every other invocation to the real binary.
   commit_file "copy-source.txt" "shared content"
 
+  # Test double: shadows the real `git` for this test only (function scope
+  # beats PATH lookup in bash) so the name-status call returns a synthetic
+  # copy record without needing git's own copy detection (-C) enabled.
+  # Args:
+  #   "$@" - forwarded verbatim to the real `git` for every call that is not
+  #          the `diff --name-status ...` one this double intercepts.
+  # Returns:
+  #   For `git diff --name-status ...`: prints a synthetic "C100
+  #   copy-source.txt\0copy-dest.txt\0" NUL-delimited record and returns 0.
+  #   For every other invocation: delegates to `command git "$@"` and
+  #   returns its exit status.
   git() {
     if [ "$1" = "diff" ] && [ "$2" = "--name-status" ]; then
       printf 'C100\0copy-source.txt\0copy-dest.txt\0'

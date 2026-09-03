@@ -16,6 +16,10 @@ set -uo pipefail
 # release on Deploy Diff Summaries being unavailable).
 
 # Maps a `git diff --name-status` letter to the payload's status vocabulary.
+# Args:
+#   $1 - status - a git diff --name-status letter/code (e.g. "A", "M", "R100", "C100").
+# Returns:
+#   Prints the mapped status word ("added"/"modified"/"deleted"/"renamed") to stdout.
 status_to_word() {
   case "$1" in
     A) echo "added" ;;
@@ -35,6 +39,11 @@ status_to_word() {
 # one; every other status emits a single record. The loop below reads
 # accordingly, discarding the old path so only the current filename is used
 # to look up numstat/patch.
+# Args:
+#   $1 - range - a git revision range, e.g. "<base_ref>..<head_ref>".
+# Returns:
+#   Prints the payload's `files` array (JSON) to stdout. Reads history/the
+#   working tree via `git`/`jq`; has no other side effects.
 build_files_json() {
   local range="$1"
   local files_json="[]"
@@ -79,6 +88,13 @@ build_files_json() {
 }
 
 # Builds the full Deploy Diff Summaries API payload for a revision range.
+# Args:
+#   $1 - base_ref   - diff range start (git ref/tag/sha).
+#   $2 - head_ref   - diff range end (git ref/tag/sha).
+#   $3 - org_id     - CircleCI organization id to embed in the payload.
+#   $4 - project_id - CircleCI project id to embed in the payload.
+# Returns:
+#   Prints the full payload object (JSON: org_id, project_id, diff) to stdout.
 build_payload() {
   local base_ref="$1" head_ref="$2" org_id="$3" project_id="$4"
   local range="${base_ref}..${head_ref}"
@@ -97,6 +113,13 @@ build_payload() {
 
 # Resolves the CircleCI organization id: $CIRCLE_ORGANIZATION_ID when set
 # (normal case in an actual CircleCI job), else `circleci api projects/<id>`.
+# Args:
+#   $1 - project_id - CircleCI project id, used to look up the org id when
+#        $CIRCLE_ORGANIZATION_ID is not already set.
+# Returns:
+#   Prints the resolved organization id to stdout, or nothing on failure —
+#   callers treat an empty result as "unresolved" rather than checking the
+#   exit status.
 resolve_org_id() {
   local project_id="$1"
   if [ -n "${CIRCLE_ORGANIZATION_ID:-}" ]; then
@@ -109,6 +132,10 @@ resolve_org_id() {
 # base_ref resolution order: explicit parameter > the tag
 # resolve_previous_deploy_tag exported ($PREV_RELEASE_TAG) > the repository
 # root commit (first release ever, so there is nothing earlier to diff).
+# Args:
+#   $1 - param_base_ref - the base_ref command parameter value (may be "").
+# Returns:
+#   Prints the resolved base ref to stdout.
 resolve_base_ref() {
   local param_base_ref="$1"
   if [ -n "$param_base_ref" ]; then
@@ -122,6 +149,11 @@ resolve_base_ref() {
 
 # head_ref resolution order: explicit parameter > the tag resolve_deploy_tag
 # exported ($RELEASE_TAG).
+# Args:
+#   $1 - param_head_ref - the head_ref command parameter value (may be "").
+# Returns:
+#   Prints the resolved head ref to stdout, or an empty string when neither
+#   the parameter nor $RELEASE_TAG is set.
 resolve_head_ref() {
   local param_head_ref="$1"
   if [ -n "$param_head_ref" ]; then
@@ -131,12 +163,32 @@ resolve_head_ref() {
   fi
 }
 
+# Logs why Deploy Diff Summaries is being skipped and exports the
+# non-blocking fallback marker for downstream release-creation steps.
+# Args:
+#   $1 - reason - human-readable message explaining why a prerequisite is
+#        missing or the payload build failed.
+# Side effects:
+#   Prints $1 to stdout; appends `export RELEASE_NOTES_SOURCE=gh-generate-notes`
+#   to $BASH_ENV.
 fall_back_to_gh_generate_notes() {
   local reason="$1"
   echo "$reason"
   echo "export RELEASE_NOTES_SOURCE=gh-generate-notes" >> "$BASH_ENV"
 }
 
+# Entry point for the "Build Deploy Diff Summaries payload" command step.
+# Resolves the token/project id/org id/base_ref/head_ref prerequisites,
+# falling back to gh-generate-notes (see fall_back_to_gh_generate_notes) and
+# exiting 0 whenever any of them cannot be resolved; otherwise builds the
+# payload and exports its file path for the next step to consume.
+# Args:
+#   None. Reads PARAM_BASE_REF, PARAM_HEAD_REF, PARAM_CIRCLE_TOKEN_ENV,
+#   CIRCLE_PROJECT_ID, CIRCLE_ORGANIZATION_ID, PREV_RELEASE_TAG, RELEASE_TAG,
+#   and DEPLOY_DIFF_PAYLOAD_FILE from the environment.
+# Side effects:
+#   Writes the payload JSON to the resolved payload file, and/or appends
+#   exports to $BASH_ENV. Always exits 0 (never fails the job).
 main() {
   local base_ref head_ref token_env token_value project_id org_id payload_file
 

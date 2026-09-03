@@ -18,6 +18,14 @@ set -uo pipefail
 # through to the gh-generate-notes fallback branch instead of aborting the
 # step non-zero (this command must never block a release).
 
+# Logs why Deploy Diff Summaries is being skipped and exports the
+# non-blocking fallback marker for downstream release-creation steps.
+# Args:
+#   $1 - reason - human-readable message explaining why the API call/poll
+#        failed or the payload file was missing.
+# Side effects:
+#   Prints $1 to stdout; appends `export RELEASE_NOTES_SOURCE=gh-generate-notes`
+#   to $BASH_ENV.
 fall_back_to_gh_generate_notes() {
   local reason="$1"
   echo "$reason"
@@ -29,6 +37,15 @@ fall_back_to_gh_generate_notes() {
 # apart) until phase == ended, then prints the summary text on stdout.
 # Prints nothing and returns 1 on any failure (missing id, timeout, or an
 # empty summary).
+# Args:
+#   $1 - payload_file  - path to the JSON payload built by
+#        make_diff_summary_payload.sh.
+#   $2 - max_polls     - maximum number of phase polls before giving up.
+#   $3 - poll_interval - seconds to sleep between polls.
+# Returns:
+#   0 with the summary text on stdout on success; 1 with no stdout on
+#   failure (POST didn't return an id, phase never reached "ended", or the
+#   summary field was empty).
 poll_for_summary() {
   local payload_file="$1" max_polls="$2" poll_interval="$3"
   local summary_id phase summary i
@@ -49,6 +66,18 @@ poll_for_summary() {
   printf '%s' "$summary"
 }
 
+# Entry point for the "Fetch Deploy Diff Summary and write release notes"
+# command step. No-ops when the previous step already signalled a fallback
+# or left no payload file behind; otherwise polls for the summary (see
+# poll_for_summary) and either writes it to the output file and exports the
+# success vars, or falls back to gh-generate-notes.
+# Args:
+#   None. Reads RELEASE_NOTES_SOURCE, DEPLOY_DIFF_PAYLOAD_FILE,
+#   PARAM_OUTPUT_FILE, PARAM_MAX_POLLS, and PARAM_POLL_INTERVAL from the
+#   environment.
+# Side effects:
+#   Writes the release notes file on success, and/or appends exports to
+#   $BASH_ENV. Always exits 0 (never fails the job).
 main() {
   local payload_file output_file max_polls poll_interval summary
 
