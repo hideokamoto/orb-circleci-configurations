@@ -6,6 +6,24 @@
 #   - any of the CI-skip markers in the commit message halts the job
 #   - an ordinary commit does not halt at all
 
+# Prepares an isolated fixture for one test case: resolves the script
+# under test, creates a scratch directory holding a PATH-stubbed
+# `circleci-agent` (that appends its arguments to a halt log instead of
+# actually halting anything) and a fresh git repo, and exports the two
+# orb parameters as the PARAM_* env vars the script reads. The real
+# `circleci` CLI's `env subst` is used as-is (it is side-effect free), so
+# it is not stubbed.
+# Arguments:
+#   None (bats-core calls this automatically before every @test).
+# Outputs:
+#   None.
+# Returns:
+#   0 on success (aborts the test via bats if any setup command fails).
+# Side effects:
+#   Creates REPO_ROOT/SCRIPT/TEST_DIR/STUB_BIN/HALT_LOG/REPO globals for
+#   the test body to use; prepends STUB_BIN to PATH; exports
+#   PARAM_RELEASE_SUBJECT_REGEX and PARAM_SKIP_CI_REGEX; writes files
+#   under TEST_DIR (a mktemp -d directory) and initializes a git repo.
 setup() {
     REPO_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/../.." && pwd)"
     SCRIPT="${REPO_ROOT}/src/scripts/skip_if_release_commit.sh"
@@ -38,15 +56,54 @@ EOF
     export PARAM_SKIP_CI_REGEX='\[skip ci\]|\[ci skip\]|circleci\[skip\]|circleci:skip'
 }
 
+# Removes the per-test scratch directory (fixture repo, stub bin, halt
+# log) created by setup(), so nothing leaks between test cases or past
+# the bats run.
+# Arguments:
+#   None (bats-core calls this automatically after every @test).
+# Outputs:
+#   None.
+# Returns:
+#   0 always.
+# Side effects:
+#   Recursively deletes TEST_DIR (and everything setup() put under it).
 teardown() {
     rm -rf "${TEST_DIR}"
 }
 
+# Creates an empty commit in the fixture repo with the given commit
+# message, used by each @test to set up the exact subject/body under
+# test.
+# Arguments:
+#   $1 - the full commit message (subject line, optionally followed by a
+#        blank line and a body) to pass to `git commit -m`.
+# Outputs:
+#   None (git's own commit output is suppressed via -q).
+# Returns:
+#   git commit's exit status (non-zero aborts the test via bats).
+# Side effects:
+#   Adds one empty commit to the git repo at REPO.
 commit() {
     git -C "${REPO}" -c user.name="Test" -c user.email="test@example.com" \
         commit -q --allow-empty -m "$1"
 }
 
+# Runs the script under test against the fixture repo's current HEAD
+# commit, capturing its exit status and output via bats-core's `run`
+# helper for the calling @test's assertions.
+# Arguments:
+#   None (operates on the REPO/SCRIPT globals set up by setup()).
+# Outputs:
+#   None directly; bats-core's `run` captures the script's stdout into
+#   $output.
+# Returns:
+#   0 always; the script's own exit status is captured into $status by
+#   bats-core's `run` rather than propagated here.
+# Side effects:
+#   Changes the shell's working directory to REPO for the remainder of
+#   the test (each @test runs in its own bats-core subshell, so this
+#   does not leak across test cases); may append to HALT_LOG via the
+#   stubbed circleci-agent if the script halts.
 run_script() {
     cd "${REPO}"
     run bash "${SCRIPT}"

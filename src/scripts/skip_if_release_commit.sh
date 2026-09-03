@@ -13,6 +13,25 @@ set -euo pipefail
 # 1.2.0 commit ..."). The CI-skip marker check intentionally scans the full
 # commit message body, matching the common `[skip ci]` / `[ci skip]`
 # convention used across CI providers.
+#
+# Globals (read):
+#   PARAM_RELEASE_SUBJECT_REGEX - grep -E pattern matched against the commit
+#                                 subject only (orb parameter release_subject_regex,
+#                                 passed through `circleci env subst`).
+#   PARAM_SKIP_CI_REGEX         - grep -E pattern matched against the full
+#                                 commit message body (orb parameter
+#                                 skip_ci_regex, passed through
+#                                 `circleci env subst`).
+# Arguments:
+#   None.
+# Outputs:
+#   Writes a one-line explanation to stdout when either check matches.
+# Returns:
+#   0 always (bash's implicit last-command status when neither check
+#   matches, or an explicit `return 0` right after halting).
+# Side effects:
+#   Calls `circleci-agent step halt` (terminating the job step in a real
+#   CircleCI run) when either check matches.
 main() {
     local release_subject_regex skip_ci_regex commit_subject commit_message
 
