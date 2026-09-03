@@ -3,6 +3,24 @@
 # (circleci, curl, apk) are stubbed via a PATH directory so no real HTTP
 # request or package install ever happens.
 
+# setup
+#
+# Role:
+#   bats-core hook run automatically before every @test in this file.
+#   Builds an isolated PATH directory holding stub `circleci`, `curl`,
+#   and `apk` executables so the script under test never performs a
+#   real HTTP request, package install, or depends on the real
+#   CircleCI CLI, and seeds the PARAM_* environment variables the
+#   command normally receives from orb parameters.
+#
+# Arguments:
+#   None (bats-core invokes this with no arguments before each test).
+#
+# Returns / side effects:
+#   Creates two temporary directories on disk (STUB_DIR, WORK_DIR) and
+#   sets REPO_ROOT, SCRIPT, CURL_CALLS, APK_CALLS as test-local
+#   variables; exports PARAM_WEBHOOK_URL_ENV, PARAM_SBOM_FILE,
+#   PARAM_RETRIES, and PARAM_MAX_TIME for the test that follows.
 setup() {
     REPO_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/../.." && pwd)"
     SCRIPT="${REPO_ROOT}/src/scripts/send_sbom_to_port.sh"
@@ -56,6 +74,20 @@ EOF
     export PARAM_MAX_TIME="60"
 }
 
+# teardown
+#
+# Role:
+#   bats-core hook run automatically after every @test in this file.
+#   Cleans up the temporary directories and environment variables that
+#   setup() (and the tests themselves) created, so no state leaks into
+#   the next test.
+#
+# Arguments:
+#   None (bats-core invokes this with no arguments after each test).
+#
+# Returns / side effects:
+#   Removes STUB_DIR and WORK_DIR from disk; unsets TEST_WEBHOOK_URL
+#   and CUSTOM_SBOM_PATH from the environment.
 teardown() {
     rm -rf "${STUB_DIR}" "${WORK_DIR}"
     unset TEST_WEBHOOK_URL CUSTOM_SBOM_PATH
