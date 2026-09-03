@@ -49,6 +49,23 @@ jobs:
       - run:
           name: Confirm trivy resolves to a working Trivy image
           command: trivy --version
+  # Exercises the enable_arm64_docker_build command on a real docker
+  # executor with setup_remote_docker, so QEMU/binfmt registration, the
+  # buildx bootstrap, and the CDK_DOCKER shim's arm64 smoke build all run
+  # for real (no PATH stubbing) -- this is the same environment shape the
+  # command expects downstream (amd64 remote-docker executor).
+  test_enable_arm64_docker_build:
+    executor: configurations/base_pinned
+    steps:
+      - setup_remote_docker
+      - configurations/enable_arm64_docker_build
+      - run:
+          name: Confirm CDK_DOCKER shim was exported and routes `docker build` through buildx
+          command: |
+            test -n "${CDK_DOCKER:-}"
+            test -x "${CDK_DOCKER}"
+            test "${DOCKER_BUILDKIT:-}" = "1"
+            grep -q 'docker buildx build --load' "${CDK_DOCKER}"
 workflows:
   test-deploy:
     jobs:
@@ -57,6 +74,8 @@ workflows:
       - test_base_pinned_executor:
           filters: *filters
       - test_trivy_executor:
+          filters: *filters
+      - test_enable_arm64_docker_build:
           filters: *filters
       # The orb must be re-packed for publishing, and saved to the workspace.
       - orb-tools/pack:
@@ -70,5 +89,6 @@ workflows:
             - orb-tools/pack
             - test_base_pinned_executor
             - test_trivy_executor
+            - test_enable_arm64_docker_build
           context: orb-publishing
           filters: *release-filters
