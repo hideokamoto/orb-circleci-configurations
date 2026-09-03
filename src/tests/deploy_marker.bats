@@ -4,6 +4,30 @@
 # calls are made through a stubbed DEPLOY_MARKER_CLI so no real
 # `circleci run release ...` call is ever attempted.
 
+# setup: bats-core per-test hook. Builds an isolated fixture for each test
+# case -- a temp $BASH_ENV file, a stubbed DEPLOY_MARKER_CLI binary (with a
+# calls.log the tests assert against), and a baseline CircleCI job
+# environment -- then sources deploy_marker.sh so its functions
+# (resolve_component_name, deploy_marker_plan, deploy_marker_update, main)
+# are callable directly from each @test block.
+#
+# Args:
+#   None. Invoked automatically by bats-core before every @test in this
+#   file; reads $BATS_TEST_FILENAME (provided by bats-core).
+# Returns:
+#   Always exits 0 (any failure inside would abort the test via bats-core's
+#   own error handling, not a script return value).
+# Side effects:
+#   - Creates a temp file (BASH_ENV) and a temp directory (STUB_DIR)
+#     containing the DEPLOY_MARKER_CLI stub and CLI_CALL_LOG; neither is
+#     cleaned up here (see teardown).
+#   - Exports BASH_ENV, CLI_CALL_LOG, DEPLOY_MARKER_CLI, CIRCLE_PROJECT_REPONAME,
+#     CIRCLE_WORKFLOW_ID and CIRCLE_SHA1 into the test process's environment.
+#   - Unsets DEPLOY_COMPONENT_NAME, DEPLOY_NAME, FAILURE_REASON and
+#     STUB_EXIT_CODE so ambient sandbox state can't leak into a test.
+#   - Sources src/scripts/deploy_marker.sh into the current shell (its
+#     `main` guard does not fire because $0 here is the bats-core runner,
+#     not the script itself).
 setup() {
   SCRIPT="$(cd "$(dirname "$BATS_TEST_FILENAME")/../.." && pwd)/src/scripts/deploy_marker.sh"
 
@@ -44,6 +68,17 @@ EOS
   source "$SCRIPT"
 }
 
+# teardown: bats-core per-test hook. Removes the fixture setup() created,
+# so no temp files or stub binaries accumulate across the suite's 25 tests.
+#
+# Args:
+#   None. Invoked automatically by bats-core after every @test in this
+#   file, regardless of whether the test passed or failed.
+# Returns:
+#   Always exits 0.
+# Side effects:
+#   Deletes the STUB_DIR directory (DEPLOY_MARKER_CLI stub + CLI_CALL_LOG)
+#   and the BASH_ENV temp file that setup() created.
 teardown() {
   rm -rf "$STUB_DIR" "$BASH_ENV"
 }
