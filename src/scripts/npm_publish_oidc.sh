@@ -11,6 +11,19 @@ set -euo pipefail
 # differs only in swapping `npm publish` for `pnpm changeset:publish`, which
 # is why the publish command is parameterized rather than hardcoded).
 
+# Requests a CircleCI OIDC ID token scoped to the npm registry audience and
+# runs the caller-supplied publish command with it.
+#
+# Arguments: none.
+# Reads (env): PARAM_AUDIENCE (OIDC "aud" claim), PARAM_PUBLISH_COMMAND (the
+#   publish command to run, e.g. "npm publish" or "pnpm changeset:publish"),
+#   CIRCLECI_CLI_PATH (optional override of the build-agent CLI path used to
+#   mint the token; defaults to /usr/bin/circleci).
+# Side effects: unsets NODE_AUTH_TOKEN / NPM_TOKEN in the current shell;
+#   exports NPM_ID_TOKEN for the publish command to pick up; invokes the
+#   CircleCI CLI and PARAM_PUBLISH_COMMAND as subprocesses; exits the whole
+#   script with status 1 (without printing the token) if the OIDC token
+#   request comes back empty.
 publish() {
   # Legacy token auth must be fully disabled before requesting the OIDC
   # token: if NODE_AUTH_TOKEN / NPM_TOKEN are set (even to an empty string),
@@ -65,6 +78,10 @@ publish() {
   bash -c "${cmd}"
 }
 
+# Script entry point, run only when this file is executed directly (not
+# sourced by BATS -- see the ORB_TEST_ENV guard below).
+#
+# Arguments: none. Side effects: delegates entirely to publish() above.
 main() {
   publish
 }

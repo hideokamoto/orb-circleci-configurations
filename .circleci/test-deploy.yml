@@ -63,6 +63,8 @@ workflows:
           filters: *filters
       - test_trivy_executor:
           filters: *filters
+      - test_npm_publish_oidc:
+          filters: *filters
       # The orb must be re-packed for publishing, and saved to the workspace.
       - orb-tools/pack:
           filters: *release-filters
@@ -75,5 +77,6 @@ workflows:
             - orb-tools/pack
             - test_base_pinned_executor
             - test_trivy_executor
+            - test_npm_publish_oidc
           context: orb-publishing
           filters: *release-filters

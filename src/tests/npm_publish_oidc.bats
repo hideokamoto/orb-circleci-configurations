@@ -12,6 +12,13 @@
 # stdout parsing, so assertions about "was publish invoked" and "did the
 # token leak" stay independent of each other.
 
+# bats-core hook run before every @test in this file.
+#
+# Arguments: none. Side effects: creates a per-test temp dir holding a stub
+# build-agent CLI (its recorded argv and emitted token are controlled per
+# test via STUB_CLI_ARGS_FILE / STUB_OIDC_TOKEN), points CIRCLECI_CLI_PATH
+# at that stub, and pre-seeds NODE_AUTH_TOKEN / NPM_TOKEN so tests can assert
+# the script clears them.
 setup() {
   REPO_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/../.." && pwd)"
   SCRIPT="${REPO_ROOT}/src/scripts/npm_publish_oidc.sh"
@@ -44,6 +51,11 @@ STUB
   unset NPM_ID_TOKEN
 }
 
+# bats-core hook run after every @test in this file.
+#
+# Arguments: none. Side effects: removes the per-test temp dir created by
+# setup() and unsets every env var setup()/the tests export, so state never
+# leaks between tests.
 teardown() {
   rm -rf "${TEST_TMPDIR}"
   unset CIRCLECI_CLI_PATH STUB_CLI_ARGS_FILE STUB_OIDC_TOKEN
