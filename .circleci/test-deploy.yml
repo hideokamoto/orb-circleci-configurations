@@ -39,6 +39,39 @@ jobs:
       - run:
           name: Confirm trivy resolves to a working Trivy image
           command: trivy --version
+  # Exercises configurations/resolve_deploy_tag end to end against a local git
+  # fixture repo (its own bare "origin" remote, never a real one), so
+  # `git fetch --tags --force origin` and `git tag --points-at` run for real
+  # without any external network side effects.
+  test_resolve_deploy_tag:
+    executor: configurations/base_pinned
+    working_directory: /tmp/resolve-deploy-tag-fixture
+    steps:
+      - run:
+          name: Build a local git fixture repo with a deploy tag on HEAD
+          command: |
+            REMOTE_DIR="$(mktemp -d)"
+            git init --quiet --bare "$REMOTE_DIR"
+            git init --quiet .
+            git config user.email "test@example.com"
+            git config user.name "Test"
+            git remote add origin "$REMOTE_DIR"
+            echo hello > file.txt
+            git add file.txt
+            git commit --quiet -m "test commit"
+            git tag 2026.09.03-abcdef0
+            git push --quiet origin HEAD:main --tags
+            echo "export RESOLVE_TAG_TEST_SHA=\"$(git rev-parse HEAD)\"" >> "$BASH_ENV"
+      - configurations/resolve_deploy_tag:
+          commit: "$RESOLVE_TAG_TEST_SHA"
+      - run:
+          name: Assert RELEASE_TAG was exported with the expected value
+          command: |
+            if [ "${RELEASE_TAG:-}" != "2026.09.03-abcdef0" ]; then
+              echo "Expected RELEASE_TAG=2026.09.03-abcdef0, got '${RELEASE_TAG:-<unset>}'"
+              exit 1
+            fi
+            echo "RELEASE_TAG resolved correctly: $RELEASE_TAG"
 workflows:
   test-deploy:
     jobs:
@@ -47,6 +80,8 @@ workflows:
       - test_base_pinned_executor:
           filters: *filters
       - test_trivy_executor:
+          filters: *filters
+      - test_resolve_deploy_tag:
           filters: *filters
       # The orb must be re-packed for publishing, and saved to the workspace.
       - orb-tools/pack:
@@ -60,5 +95,6 @@ workflows:
             - orb-tools/pack
             - test_base_pinned_executor
             - test_trivy_executor
+            - test_resolve_deploy_tag
           context: orb-publishing
           filters: *release-filters

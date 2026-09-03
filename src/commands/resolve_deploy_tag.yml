@@ -1,0 +1,49 @@
+description: >
+  Resolve the deploy tag that release automation actually pushed to a given
+  commit, and export it to `$BASH_ENV`. The tag name is deliberately read
+  back from git (`git tag --points-at`) instead of being recomputed from the
+  current date. Recomputing it with `date` would let a UTC day boundary
+  crossed between the deploy and this step compute a different tag name than
+  the one that was really pushed, silently skipping the release. Reading the
+  tag straight off the commit is deterministic and timezone-independent. When
+  no matching tag is found (for example because the deploy was skipped), this
+  command halts the step by default via `circleci-agent step halt`, treating
+  it as a successful no-op.
+
+parameters:
+  tag_regex:
+    type: string
+    default: '^[0-9]{4}\.[0-9]{2}\.[0-9]{2}-[0-9a-f]{7}$'
+    description: >
+      Extended regular expression a candidate tag must fully match to be
+      considered a deploy tag. Defaults to the `YYYY.MM.DD-<sha7>` format
+      produced by this orb's tag-pushing command.
+  commit:
+    type: string
+    default: ""
+    description: >
+      Commit-ish to look up tags on. Empty (the default) resolves to
+      `$CIRCLE_SHA1`.
+  output_env:
+    type: string
+    default: RELEASE_TAG
+    description: >
+      Name of the environment variable exported to `$BASH_ENV` with the
+      resolved tag value.
+  halt_if_missing:
+    type: boolean
+    default: true
+    description: >
+      When true (default), halt the step via `circleci-agent step halt` if no
+      tag matches. When false, continue without exporting `output_env`,
+      leaving the caller to decide what a missing tag means.
+
+steps:
+  - run:
+      name: Resolve deploy tag for this commit
+      environment:
+        PARAM_TAG_REGEX: <<parameters.tag_regex>>
+        PARAM_COMMIT: <<parameters.commit>>
+        PARAM_OUTPUT_ENV: <<parameters.output_env>>
+        PARAM_HALT_IF_MISSING: <<parameters.halt_if_missing>>
+      command: <<include(scripts/resolve_deploy_tag.sh)>>
