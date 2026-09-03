@@ -49,6 +49,40 @@ jobs:
       - run:
           name: Confirm trivy resolves to a working Trivy image
           command: trivy --version
+  # Exercises send_sbom_to_port's happy path end-to-end (parameter wiring,
+  # circleci env subst, curl invocation) without ever sending a real
+  # request: a stub curl on PATH records the invocation instead of
+  # dialing out. The exit-1 "webhook url unset" path is covered by BATS.
+  test_send_sbom_to_port:
+    executor: configurations/base_pinned
+    environment:
+      TEST_PORT_WEBHOOK_URL: "http://127.0.0.1:8080/webhook"
+    steps:
+      - checkout
+      - run:
+          name: Install a stub curl and a fixture SBOM file
+          command: |
+            mkdir -p /tmp/stub-bin
+            cat > /tmp/stub-bin/curl <<'CURL_STUB'
+            #!/usr/bin/env bash
+            printf '%s\n' "$@" > /tmp/curl-calls.log
+            exit 0
+            CURL_STUB
+            chmod +x /tmp/stub-bin/curl
+            echo 'export PATH="/tmp/stub-bin:$PATH"' >> "$BASH_ENV"
+            echo '{"bomFormat":"CycloneDX","components":[]}' > /tmp/test-sbom.cdx.json
+      - configurations/send_sbom_to_port:
+          webhook_url_env: TEST_PORT_WEBHOOK_URL
+          sbom_file: /tmp/test-sbom.cdx.json
+          retries: 1
+          max_time: 5
+      - run:
+          name: Confirm the stub curl received the expected POST
+          command: |
+            test -f /tmp/curl-calls.log
+            grep -q -- '--data-binary' /tmp/curl-calls.log
+            grep -q '@/tmp/test-sbom.cdx.json' /tmp/curl-calls.log
+            grep -q -- "${TEST_PORT_WEBHOOK_URL}" /tmp/curl-calls.log
 workflows:
   test-deploy:
     jobs:
@@ -57,6 +91,8 @@ workflows:
       - test_base_pinned_executor:
           filters: *filters
       - test_trivy_executor:
+          filters: *filters
+      - test_send_sbom_to_port:
           filters: *filters
       # The orb must be re-packed for publishing, and saved to the workspace.
       - orb-tools/pack:
@@ -70,5 +106,6 @@ workflows:
             - orb-tools/pack
             - test_base_pinned_executor
             - test_trivy_executor
+            - test_send_sbom_to_port
           context: orb-publishing
           filters: *release-filters
