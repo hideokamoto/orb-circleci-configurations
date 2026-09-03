@@ -1,0 +1,57 @@
+description: >
+  Resolve the release tag immediately before the current release, using only
+  the ancestor relationships in the commit graph as the source of truth.
+
+  Two more obvious approaches were rejected during the source migration:
+  `git tag --sort=-refname` breaks when a project deploys more than once on
+  the same calendar day, because the sha7 suffix of same-day tags then sorts
+  lexicographically rather than by deploy order (observed in production: a
+  project that deployed 5 times in one day and 3 times the next). `git tag
+  --sort=-creatordate` looked safer, but CI commit timestamps only have
+  one-second resolution, so two tags created within the same second still
+  sort unpredictably. Neither external timestamp is trustworthy, so this
+  command instead walks `git log` from the current release commit toward its
+  ancestors — a commit is always enumerated before any of its ancestors,
+  which is a topological invariant unaffected by clock skew or same-second
+  tags — and takes the first commit along that walk that carries a tag
+  matching <<parameters.tag_regex>> other than the current release tag
+  itself.
+
+  Exports the previous tag (when one is found) to `$BASH_ENV` under
+  <<parameters.output_env>>. On the very first release, no matching ancestor
+  tag exists, so nothing is exported and downstream steps must treat the
+  variable as optional.
+
+parameters:
+  tag_regex:
+    type: string
+    default: '^[0-9]{4}\.[0-9]{2}\.[0-9]{2}-[0-9a-f]{7}$'
+    description: >
+      Extended regular expression (as passed to `grep -E`) that a tag must
+      match to be considered a release tag. Defaults to the
+      YYYY.MM.DD-<sha7> release tag shape used by this orb's release
+      commands.
+  release_tag_env:
+    type: env_var_name
+    default: RELEASE_TAG
+    description: >
+      Name of the environment variable already holding the release tag for
+      the current commit (as set by, e.g., the resolve_deploy_tag command).
+      Read by indirection so callers can point this command at any
+      previously exported tag variable.
+  output_env:
+    type: string
+    default: PREV_RELEASE_TAG
+    description: >
+      Name of the environment variable to export (via $BASH_ENV) with the
+      previous release tag. Left unset when no previous release tag is
+      found, so downstream steps must not assume it is always present.
+
+steps:
+  - run:
+      name: Resolve previous release tag
+      environment:
+        PARAM_TAG_REGEX: <<parameters.tag_regex>>
+        PARAM_RELEASE_TAG_ENV: <<parameters.release_tag_env>>
+        PARAM_OUTPUT_ENV: <<parameters.output_env>>
+      command: <<include(scripts/resolve_previous_deploy_tag.sh)>>
