@@ -49,6 +49,27 @@ jobs:
       - run:
           name: Confirm trivy resolves to a working Trivy image
           command: trivy --version
+  test_skip_unless_changed:
+    # Exercises the command's "continue" path against this checkout's real
+    # git history: base_revision is left empty (mirrors a GitHub App
+    # pipeline where pipeline.git.base_revision resolves empty) so the
+    # command falls back to fallback=parent_commit (HEAD^1), then halts
+    # unless a src/ path changed between HEAD^1 and HEAD. Every PR touching
+    # this command touches src/, so this exercises the non-halt branch on
+    # real data; the halt branch is covered by BATS against a stubbed
+    # circleci-agent (halting here would also make the job report success,
+    # so it cannot itself prove a halt happened).
+    executor: configurations/base_pinned
+    steps:
+      - checkout
+      - configurations/skip_unless_changed:
+          base_revision: ""
+          fallback: parent_commit
+          mode: skip_unless_matches
+          pattern: '^src/'
+      - run:
+          name: Confirm this step ran (job was not halted)
+          command: echo "skip_unless_changed continued past the skip check as expected"
 workflows:
   test-deploy:
     jobs:
@@ -57,6 +78,8 @@ workflows:
       - test_base_pinned_executor:
           filters: *filters
       - test_trivy_executor:
+          filters: *filters
+      - test_skip_unless_changed:
           filters: *filters
       # The orb must be re-packed for publishing, and saved to the workspace.
       - orb-tools/pack:
@@ -70,5 +93,6 @@ workflows:
             - orb-tools/pack
             - test_base_pinned_executor
             - test_trivy_executor
+            - test_skip_unless_changed
           context: orb-publishing
           filters: *release-filters
