@@ -1,0 +1,56 @@
+description: >
+  Install a version-pinned bun toolchain and put it on PATH, mirroring the
+  "restore cache -> verify version -> reinstall on mismatch -> save cache"
+  step that was duplicated across the AI-DLC validation jobs and the
+  bun-flavored npm publish jobs in the source repo. The version check exists
+  because a stale cache entry (e.g. left over from an older pinned version)
+  must never silently run the wrong bun; a mismatch always triggers a clean
+  reinstall rather than trusting the cache. Dependency caching (keyed on
+  bun.lockb) is intentionally out of scope here and left to the caller /
+  a separate command, since it is per-project rather than per-toolchain.
+
+parameters:
+  version:
+    type: string
+    default: "1.3.14"
+    description: >
+      Pinned bun version to install (without the "bun-v" / "v" prefix,
+      e.g. "1.3.14"). Installed bun's `--version` output must match this
+      exactly, or the toolchain is reinstalled.
+  cache:
+    type: boolean
+    default: true
+    description: >
+      Whether to restore/save the installed toolchain under
+      ~/.bun via CircleCI's built-in cache. When false, bun is installed
+      fresh on every run with no restore_cache/save_cache steps.
+  cache_key_prefix:
+    type: string
+    default: "v1-bun-toolchain"
+    description: >
+      Prefix for the toolchain cache key. The full key is
+      "<cache_key_prefix>-<version>", so bumping the version naturally
+      busts the cache. This key is for the bun binary only; it is
+      independent from any dependency (bun.lockb) cache key.
+
+steps:
+  - when:
+      condition: <<parameters.cache>>
+      steps:
+        - restore_cache:
+            name: Restore bun toolchain cache
+            keys:
+              - <<parameters.cache_key_prefix>>-<<parameters.version>>
+  - run:
+      name: Install bun
+      environment:
+        PARAM_VERSION: <<parameters.version>>
+      command: <<include(scripts/install_bun.sh)>>
+  - when:
+      condition: <<parameters.cache>>
+      steps:
+        - save_cache:
+            name: Save bun toolchain cache
+            key: <<parameters.cache_key_prefix>>-<<parameters.version>>
+            paths:
+              - ~/.bun
