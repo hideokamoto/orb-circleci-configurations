@@ -27,7 +27,8 @@ parameters:
       Path to the CycloneDX SBOM JSON file to send as the request body
       (via curl --data-binary @<file>). May reference other environment
       variables (e.g. "$SBOM_DIR/sbom.cdx.json"); they are expanded with
-      `circleci env subst`.
+      `circleci env subst` (invoked via the CircleCI CLI's fixed install
+      path, not bare `circleci`, since it isn't reliably on PATH).
   retries:
     type: integer
     default: 3

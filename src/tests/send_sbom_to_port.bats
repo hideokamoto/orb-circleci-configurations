@@ -1,17 +1,21 @@
 #!/usr/bin/env bats
 # Unit tests for src/scripts/send_sbom_to_port.sh. External commands
-# (circleci, curl, apk) are stubbed via a PATH directory so no real HTTP
-# request or package install ever happens.
+# (circleci, curl, apk) are stubbed so no real HTTP request or package
+# install ever happens. The script calls the CircleCI CLI via the
+# $CIRCLECI_CLI variable (it isn't reliably on PATH on job images such as
+# cimg/base), so these tests redirect that variable to a stub rather than
+# relying on PATH lookup; curl and apk are still stubbed via PATH.
 
 # setup
 #
 # Role:
 #   bats-core hook run automatically before every @test in this file.
-#   Builds an isolated PATH directory holding stub `circleci`, `curl`,
-#   and `apk` executables so the script under test never performs a
-#   real HTTP request, package install, or depends on the real
-#   CircleCI CLI, and seeds the PARAM_* environment variables the
-#   command normally receives from orb parameters.
+#   Builds a stub `circleci` script and points $CIRCLECI_CLI at it, adds
+#   stub `curl` and `apk` executables to an isolated PATH directory, so
+#   the script under test never performs a real HTTP request, package
+#   install, or depends on the real CircleCI CLI, and seeds the PARAM_*
+#   environment variables the command normally receives from orb
+#   parameters.
 #
 # Arguments:
 #   None (bats-core invokes this with no arguments before each test).
@@ -20,7 +24,8 @@
 #   Creates two temporary directories on disk (STUB_DIR, WORK_DIR) and
 #   sets REPO_ROOT, SCRIPT, CURL_CALLS, APK_CALLS as test-local
 #   variables; exports PARAM_WEBHOOK_URL_ENV, PARAM_SBOM_FILE,
-#   PARAM_RETRIES, and PARAM_MAX_TIME for the test that follows.
+#   PARAM_RETRIES, PARAM_MAX_TIME, and CIRCLECI_CLI for the test that
+#   follows.
 setup() {
     REPO_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/../.." && pwd)"
     SCRIPT="${REPO_ROOT}/src/scripts/send_sbom_to_port.sh"
@@ -32,7 +37,9 @@ setup() {
 
     # Fake `circleci env subst`: expands $VAR / ${VAR} references in its
     # argument the same way the real CLI subcommand does, without needing
-    # the actual circleci binary.
+    # the actual circleci binary. Exposed to the script under test via
+    # $CIRCLECI_CLI (below), not PATH, matching how send_sbom_to_port.sh
+    # invokes it.
     cat >"${STUB_DIR}/circleci" <<'EOF'
 #!/usr/bin/env bash
 if [ "$1" = "env" ] && [ "$2" = "subst" ]; then
@@ -44,6 +51,7 @@ echo "unexpected circleci invocation: $*" >&2
 exit 1
 EOF
     chmod +x "${STUB_DIR}/circleci"
+    export CIRCLECI_CLI="${STUB_DIR}/circleci"
 
     # Fake curl: records every argument it was called with, then succeeds.
     cat >"${STUB_DIR}/curl" <<EOF
@@ -86,11 +94,11 @@ EOF
 #   None (bats-core invokes this with no arguments after each test).
 #
 # Returns / side effects:
-#   Removes STUB_DIR and WORK_DIR from disk; unsets TEST_WEBHOOK_URL
-#   and CUSTOM_SBOM_PATH from the environment.
+#   Removes STUB_DIR and WORK_DIR from disk; unsets TEST_WEBHOOK_URL,
+#   CUSTOM_SBOM_PATH, and CIRCLECI_CLI from the environment.
 teardown() {
     rm -rf "${STUB_DIR}" "${WORK_DIR}"
-    unset TEST_WEBHOOK_URL CUSTOM_SBOM_PATH
+    unset TEST_WEBHOOK_URL CUSTOM_SBOM_PATH CIRCLECI_CLI
 }
 
 @test "exits 1 when the webhook url env var is unset" {

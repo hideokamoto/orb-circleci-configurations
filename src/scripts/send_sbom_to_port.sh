@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# cimg/base (and other job images) don't reliably put `circleci` on PATH —
+# the CLI is provided at a fixed path. Call it via this variable rather
+# than bare `circleci` so the command works regardless of PATH, and so
+# BATS can redirect it to a stub. Override with $CIRCLECI_CLI for images
+# that install it elsewhere.
+CIRCLECI_CLI="${CIRCLECI_CLI:-/usr/bin/circleci}"
+
 # send_sbom_to_port
 #
 # Role:
@@ -14,7 +21,7 @@ set -euo pipefail
 #   None. Reads the orb command's parameters via the environment
 #   variables the generated run step sets: PARAM_WEBHOOK_URL_ENV (name
 #   of the env var holding the webhook URL), PARAM_SBOM_FILE (path to
-#   the SBOM JSON file, resolved via `circleci env subst`),
+#   the SBOM JSON file, resolved via `$CIRCLECI_CLI env subst`),
 #   PARAM_RETRIES and PARAM_MAX_TIME (curl --retry / --max-time values).
 #
 # Returns / side effects:
@@ -33,7 +40,7 @@ send_sbom_to_port() {
     fi
 
     local sbom_file
-    sbom_file="$(circleci env subst "${PARAM_SBOM_FILE}")"
+    sbom_file="$("${CIRCLECI_CLI}" env subst "${PARAM_SBOM_FILE}")"
 
     # trivy's aquasec/trivy image is alpine-based and doesn't ship curl.
     command -v curl >/dev/null 2>&1 || apk add --no-cache curl
