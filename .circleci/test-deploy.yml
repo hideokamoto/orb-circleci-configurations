@@ -49,6 +49,43 @@ jobs:
       - run:
           name: Confirm trivy resolves to a working Trivy image
           command: trivy --version
+  test_push_deploy_tag:
+    # Exercises the push_deploy_tag command against a throwaway local bare
+    # git remote (never a real upstream), covering both the "no tag yet"
+    # create path and the "tag already exists" skip path in one job.
+    executor: configurations/base_pinned
+    working_directory: /tmp/push_deploy_tag_test
+    steps:
+      - run:
+          name: Set up a local bare remote and seed a commit
+          command: |
+            set -euo pipefail
+            git init --bare /tmp/push_deploy_tag_remote.git
+            git clone /tmp/push_deploy_tag_remote.git .
+            git config user.email "orb-test@example.com"
+            git config user.name "Orb Test"
+            git commit --allow-empty -m "seed commit"
+            git push origin HEAD:main
+            echo "export CIRCLE_SHA1=$(git rev-parse HEAD)" >> "$BASH_ENV"
+      - configurations/push_deploy_tag:
+          date_format: "%Y.%m.%d"
+          sha_length: 7
+      - run:
+          name: Verify the tag was created and pushed to the local remote
+          command: |
+            set -euo pipefail
+            TAG="$(date -u +%Y.%m.%d)-${CIRCLE_SHA1:0:7}"
+            git ls-remote --tags origin "$TAG" | grep -q "$TAG"
+      - configurations/push_deploy_tag:
+          date_format: "%Y.%m.%d"
+          sha_length: 7
+      - run:
+          name: Verify a second run hits the skip path without erroring
+          command: |
+            set -euo pipefail
+            TAG="$(date -u +%Y.%m.%d)-${CIRCLE_SHA1:0:7}"
+            COUNT="$(git ls-remote --tags origin | grep -c "$TAG")"
+            [ "$COUNT" -eq 1 ]
 workflows:
   test-deploy:
     jobs:
@@ -57,6 +94,8 @@ workflows:
       - test_base_pinned_executor:
           filters: *filters
       - test_trivy_executor:
+          filters: *filters
+      - test_push_deploy_tag:
           filters: *filters
       # The orb must be re-packed for publishing, and saved to the workspace.
       - orb-tools/pack:
@@ -70,5 +109,6 @@ workflows:
             - orb-tools/pack
             - test_base_pinned_executor
             - test_trivy_executor
+            - test_push_deploy_tag
           context: orb-publishing
           filters: *release-filters

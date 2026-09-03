@@ -1,0 +1,63 @@
+description: >
+  Pushes a date-stamped release tag ("<date_format>-<first sha_length chars
+  of CIRCLE_SHA1>", e.g. "2026.09.03-abcdef0") to the "origin" remote on a
+  successful deploy, and skips silently if a tag with that exact name
+  already exists on the remote — so re-runs against the same commit stay
+  idempotent instead of failing on a duplicate tag push. Ported from the
+  "Push git tag on success" step duplicated across 5 deploy workflows in
+  circleci-configurations (aws-cdk, aws-cdk-arm64, aws-cdkd, aws-cdkd-arm64,
+  cloudflare-workers).
+
+  Push authentication against "origin" (e.g. via the `gh/setup` command
+  from the `circleci/github-cli` orb) must already be configured by the
+  caller before this command runs; this command does not call `gh/setup`
+  itself, matching the source, which relied on the same job having already
+  authenticated earlier in its steps. Likewise, gating this command to only
+  run after a successful deploy (`when: on_success` on the invoking step,
+  or an equivalent step-list gate) is the caller's responsibility, exactly
+  as in the source.
+
+  Behavior difference from the source: the source computed the tag's date
+  with plain `date +<format>`, which resolves in the runner's local
+  timezone. Since CircleCI's Linux/Docker execution environments default to
+  UTC, this rarely differed in practice, but the result was still
+  technically dependent on whatever timezone the runner's OS/image was
+  configured with, so a future image change could silently shift which
+  calendar date a build close to midnight UTC gets tagged with. This
+  command pins the date to `date -u`, so the tag's calendar date is always
+  UTC-based and deterministic regardless of the runner's local timezone
+  configuration.
+
+  The tag format produced here is meant to stay paired with
+  `skip_unless_changed`'s deploy-tag glob matching and with
+  `resolve_deploy_tag` / `resolve_previous_deploy_tag`'s `tag_regex`
+  parameters (see the orb README for the full cross-reference). When
+  overriding `date_format` or `sha_length` from their defaults, keep those
+  other commands' patterns in sync or tag resolution elsewhere in the orb
+  will stop matching the tags this command creates.
+
+parameters:
+  date_format:
+    type: string
+    default: "%Y.%m.%d"
+    description: >
+      Format string passed to `date -u +"<date_format>"` for the date
+      portion of the tag. Must not contain "/" or whitespace, since the
+      result becomes part of a git ref name. Keep in sync with the
+      tag-matching patterns used by `skip_unless_changed`,
+      `resolve_deploy_tag`, and `resolve_previous_deploy_tag` if changed
+      from the default.
+  sha_length:
+    type: integer
+    default: 7
+    description: >
+      Number of leading characters of $CIRCLE_SHA1 to append after the
+      date (joined by "-"), forming tags like "<date>-<short-sha>".
+
+steps:
+  - run:
+      name: Push git tag on success
+      environment:
+        PARAM_DATE_FORMAT: <<parameters.date_format>>
+        PARAM_SHA_LENGTH: <<parameters.sha_length>>
+      command: <<include(scripts/push_deploy_tag.sh)>>
