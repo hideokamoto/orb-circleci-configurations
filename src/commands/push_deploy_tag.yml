@@ -52,7 +52,10 @@ parameters:
     default: 7
     description: >
       Number of leading characters of $CIRCLE_SHA1 to append after the
-      date (joined by "-"), forming tags like "<date>-<short-sha>".
+      date (joined by "-"), forming tags like "<date>-<short-sha>". Must
+      be an integer from 1 through the length of $CIRCLE_SHA1 (typically
+      40); the command validates this before creating the tag and fails
+      fast on 0, negative, or non-numeric values.
 
 steps:
   - run:

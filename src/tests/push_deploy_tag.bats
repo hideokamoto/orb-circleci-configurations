@@ -33,15 +33,27 @@
 #   the hook's final command or explicitly checked).
 # Side effects:
 #   Creates a temp directory tree (TEST_DIR containing REMOTE_DIR,
-#   WORK_DIR, and the CIRCLECI_CLI stub script), changes the shell's
-#   working directory to WORK_DIR, and exports CIRCLE_SHA1 and
-#   CIRCLECI_CLI for the duration of the test.
+#   WORK_DIR, a throwaway HOME, and the CIRCLECI_CLI stub script), changes
+#   the shell's working directory to WORK_DIR, and exports CIRCLE_SHA1,
+#   CIRCLECI_CLI, HOME, and GIT_CONFIG_NOSYSTEM for the duration of the
+#   test (the latter two isolate git from this machine's real
+#   ~/.gitconfig).
 setup() {
   SCRIPT="$(cd "$(dirname "$BATS_TEST_FILENAME")/../.." && pwd)/src/scripts/push_deploy_tag.sh"
 
   TEST_DIR="$(mktemp -d)"
   REMOTE_DIR="${TEST_DIR}/remote.git"
   WORK_DIR="${TEST_DIR}/work"
+
+  # Isolate git from this machine's real ~/.gitconfig for the whole test
+  # (a throwaway HOME, plus GIT_CONFIG_NOSYSTEM): the ambient config in
+  # this environment sets push.negotiate=true and commit.gpgsign=true,
+  # neither of which this disposable local-remote fixture needs, and the
+  # former intermittently prints a spurious "push negotiation failed"
+  # warning that has no bearing on these tests.
+  export HOME="${TEST_DIR}/home"
+  mkdir -p "${HOME}"
+  export GIT_CONFIG_NOSYSTEM=1
 
   git init --quiet --bare "${REMOTE_DIR}"
   git clone --quiet "${REMOTE_DIR}" "${WORK_DIR}"
@@ -173,4 +185,106 @@ teardown() {
   run git ls-remote --tags origin
   count="$(printf '%s\n' "$output" | grep -c "${expected_tag}" || true)"
   [ "$count" -eq 1 ]
+}
+
+@test "rejects a sha_length of 0" {
+  export PARAM_DATE_FORMAT="%Y.%m.%d"
+  export PARAM_SHA_LENGTH="0"
+
+  run push_deploy_tag
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"sha_length must be an integer between 1 and"* ]]
+
+  # no tag was created or pushed
+  run git tag -l
+  [ -z "$output" ]
+  run git ls-remote --tags origin
+  [ -z "$output" ]
+}
+
+@test "rejects a negative sha_length" {
+  export PARAM_DATE_FORMAT="%Y.%m.%d"
+  export PARAM_SHA_LENGTH="-1"
+
+  run push_deploy_tag
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"sha_length must be an integer between 1 and"* ]]
+
+  run git tag -l
+  [ -z "$output" ]
+  run git ls-remote --tags origin
+  [ -z "$output" ]
+}
+
+@test "recovers when a concurrent job already pushed the same tag for the same commit" {
+  export PARAM_DATE_FORMAT="%Y.%m.%d"
+  export PARAM_SHA_LENGTH="7"
+
+  expected_tag="$(date -u +%Y.%m.%d)-${CIRCLE_SHA1:0:7}"
+
+  # Simulate a second job racing this one against the same commit: it
+  # clones the same origin and pushes the identical tag right as this
+  # test's push_deploy_tag() has already passed its own pre-push
+  # existence check (the race window CodeRabbit flagged) and is about to
+  # push. Note this does NOT rely on git's local push rejecting a
+  # same-name/same-target lightweight tag — a live re-negotiation with
+  # the remote (which every `git push` performs) sees the two as already
+  # equal and reports "Everything up-to-date" rather than a rejection, so
+  # that natural path can't deterministically reproduce a real CI
+  # ref-update race in a sequential test. Instead the shadowed `git`
+  # below forces this job's own `git push origin <tag>` call to return
+  # non-zero regardless, standing in for the compare-and-swap rejection a
+  # real concurrent push can hit — so what's under test is solely
+  # push_deploy_tag()'s recovery path: does it correctly treat "push
+  # failed, but the tag is now on the remote pointing at CIRCLE_SHA1" as
+  # success?
+  OTHER_CLONE="${TEST_DIR}/other-work"
+  # --branch main: the bare remote's own default-branch symref was never
+  # updated to "main" (only the "main" ref itself was created, by
+  # setup()'s `git push origin HEAD:main`), so a plain clone would follow
+  # that stale default and check out nothing.
+  git clone --branch main --quiet "${REMOTE_DIR}" "${OTHER_CLONE}"
+
+  git() {
+    if [ "$1" = "push" ] && [ "$2" = "origin" ] && [ "$3" = "${expected_tag}" ]; then
+      ( cd "${OTHER_CLONE}" && command git tag "${expected_tag}" && command git push --quiet origin "${expected_tag}" ) >/dev/null
+      return 1
+    fi
+    command git "$@"
+  }
+
+  run push_deploy_tag
+  unset -f git
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"created concurrently"* ]]
+
+  # the remote ends up with exactly one such tag, pointing at CIRCLE_SHA1
+  run git ls-remote --tags origin "refs/tags/${expected_tag}"
+  [ "$status" -eq 0 ]
+  [[ "$output" == "${CIRCLE_SHA1}"$'\t'"refs/tags/${expected_tag}" ]]
+}
+
+@test "still fails when git push is rejected and the tag is not found on recheck" {
+  export PARAM_DATE_FORMAT="%Y.%m.%d"
+  export PARAM_SHA_LENGTH="7"
+
+  expected_tag="$(date -u +%Y.%m.%d)-${CIRCLE_SHA1:0:7}"
+
+  # Force every `git push` to fail, and never let the tag actually land on
+  # the remote, so the post-push recheck must find nothing and this must
+  # still fail (not be swallowed as a false "concurrent" success).
+  git() {
+    if [ "$1" = "push" ]; then
+      return 17
+    fi
+    command git "$@"
+  }
+
+  run push_deploy_tag
+  unset -f git
+  [ "$status" -eq 17 ]
+  [[ "$output" != *"created concurrently"* ]]
+
+  run git ls-remote --tags origin
+  [ -z "$output" ]
 }
