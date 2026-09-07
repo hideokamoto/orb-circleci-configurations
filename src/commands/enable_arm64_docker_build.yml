@@ -1,0 +1,70 @@
+description: >
+  Bootstraps cross-architecture Docker builds on an amd64 remote-docker
+  executor: registers QEMU/binfmt arm64 emulation via `tonistiigi/binfmt`,
+  asserts the emulation actually produces an aarch64 userland, creates (or
+  reuses) a `docker buildx` builder, and installs a `CDK_DOCKER` shim that
+  routes `docker build` through `docker buildx build --load`. AWS CDK
+  invokes the `docker` binary directly for `DockerImageAsset` builds and
+  honors the `CDK_DOCKER` environment variable to redirect that invocation,
+  which is what makes the shim work without patching CDK itself. Ported
+  from the canonical `workflows/deployment/snippets/cdk-arm64-docker-setup.sh`
+  in the source repo (previously duplicated across `aws-cdk-arm64.yaml` and
+  `aws-cdkd-arm64.yaml` and kept in sync by a grep-based validator script;
+  both the duplication and the validator are made unnecessary by this
+  command). Must run after `setup_remote_docker` — it needs a real Docker
+  daemon with `--privileged` support for the binfmt installer container.
+
+  IMPORTANT — scope limit: the `CDK_DOCKER` shim only intercepts
+  `docker build` invocations (the mechanism CDK's `DockerImageAsset` uses).
+  It does NOT cover `docker run -v <asset>:/asset-input ...` bind-mount
+  style builds, which is how CDK's `NodejsFunction` bundling invokes
+  Docker. Bind-mount builds do not work against CircleCI's remote Docker
+  regardless of architecture or this shim, on both amd64 and arm64
+  templates; the fix for `NodejsFunction` is a local esbuild bundle that
+  avoids Docker entirely, not this command.
+
+parameters:
+  binfmt_image:
+    type: string
+    default: "tonistiigi/binfmt:qemu-v9.2.2"
+    description: >
+      Pinned `tonistiigi/binfmt` image used to register QEMU emulation for
+      the arm64 architecture. Pinned (rather than `:latest`) so a run
+      against the same commit stays reproducible. Resolved at runtime via
+      `circleci env subst`, so callers may pass a value containing `$VAR`
+      references.
+  alpine_image:
+    type: string
+    default: "alpine:3.21"
+    description: >
+      Base image used both for the post-registration emulation assertion
+      (`uname -m` must report `aarch64`) and as the `FROM` line of the
+      smoke-test Dockerfile. Resolved at runtime via `circleci env subst`.
+  builder_name:
+    type: string
+    default: "cdk-multiarch"
+    description: >
+      Name of the `docker buildx` builder to create (or reuse, if a builder
+      with this name already exists from a prior step in the same job).
+      Resolved at runtime via `circleci env subst`.
+  smoke_test:
+    type: boolean
+    default: true
+    description: >
+      When true, builds a throwaway single-`RUN`-step arm64 image after the
+      shim is installed and removes it immediately. This reproduces CDK
+      `DockerImageAsset`'s failure mode (an arm64 `docker build` with a
+      `RUN` step) so a broken emulation/buildx setup fails fast in this
+      step rather than deep inside `cdk deploy`. Set to false only when a
+      caller already runs an equivalent build immediately afterward and
+      wants to avoid the extra build time.
+
+steps:
+  - run:
+      name: Enable multi-arch Docker builds (QEMU/binfmt + buildx)
+      environment:
+        PARAM_BINFMT_IMAGE: <<parameters.binfmt_image>>
+        PARAM_ALPINE_IMAGE: <<parameters.alpine_image>>
+        PARAM_BUILDER_NAME: <<parameters.builder_name>>
+        PARAM_SMOKE_TEST: <<parameters.smoke_test>>
+      command: <<include(scripts/enable_arm64_docker_build.sh)>>
