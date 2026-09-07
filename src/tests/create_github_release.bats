@@ -4,10 +4,16 @@
 # `gh` and `circleci-agent` are stubbed via a PATH-prepended fixture
 # directory, so the tests never touch a real GitHub repo and never halt
 # the actual bats process. The `gh` stub records every "release create"
-# invocation (one line per call, space-joined args) to CALL_LOG, and its
-# "release view" behavior (found / not found) is controlled per test via
-# GH_VIEW_EXIT. The `circleci-agent` stub records "step halt" calls to
-# HALT_LOG so a halt can be asserted without actually stopping the step.
+# invocation (one line per call, space-joined args) to CALL_LOG, and exits
+# with GH_CREATE_EXIT (default 0). "release view" is called up to twice per
+# script run (the idempotency pre-check, and gh_release_create_race_safe's
+# re-check after a failed create) and its exit status is tracked per call
+# via GH_VIEW_CALL_COUNT_FILE: the 1st invocation exits GH_VIEW_EXIT
+# (default 1 = not found), any later invocation exits GH_VIEW_EXIT_2
+# (defaults to GH_VIEW_EXIT, so tests that never trigger a 2nd view call
+# don't need to set it). The `circleci-agent` stub records "step halt"
+# calls to HALT_LOG so a halt can be asserted without actually stopping
+# the step.
 #
 # The script is run as a real subprocess (`bash "${SCRIPT}"`) rather than
 # sourced, so its "Will not run if sourced for bats-core tests" guard does
@@ -19,10 +25,11 @@
 # Side effects: resolves SCRIPT to the path under test; creates a fresh
 #   TEST_DIR with a STUB_BIN directory containing `gh` and `circleci-agent`
 #   stubs (prepended onto PATH) plus empty CALL_LOG / HALT_LOG files for the
-#   stubs to append to; exports the PARAM_* env vars the script reads by
-#   default; and unsets RELEASE_TAG / PREV_RELEASE_TAG /
-#   RELEASE_NOTES_SOURCE / RELEASE_NOTES_FILE so each test starts from a
-#   clean, known environment.
+#   stubs to append to and a GH_VIEW_CALL_COUNT_FILE path (left uncreated;
+#   the gh stub creates it lazily on its first "release view" call);
+#   exports the PARAM_* env vars the script reads by default; and unsets
+#   RELEASE_TAG / PREV_RELEASE_TAG / RELEASE_NOTES_SOURCE /
+#   RELEASE_NOTES_FILE so each test starts from a clean, known environment.
 setup() {
   REPO_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/../.." && pwd)"
   SCRIPT="${REPO_ROOT}/src/scripts/create_github_release.sh"
@@ -32,20 +39,33 @@ setup() {
   mkdir -p "${STUB_BIN}"
   CALL_LOG="${TEST_DIR}/gh-calls.log"
   HALT_LOG="${TEST_DIR}/halt-calls.log"
+  GH_VIEW_CALL_COUNT_FILE="${TEST_DIR}/gh-view-call-count"
   : > "${CALL_LOG}"
   : > "${HALT_LOG}"
 
-  # gh stub: "release view <tag>" exits with GH_VIEW_EXIT (default 1 = not
-  # found, matching gh's real behavior for a missing release). "release
-  # create ..." logs its full argv and exits 0.
+  # gh stub: "release view <tag>" tracks its own call count (across the
+  # whole script run) in GH_VIEW_CALL_COUNT_FILE so a test can give the
+  # idempotency pre-check and gh_release_create_race_safe's post-create
+  # re-check different answers -- the 1st call exits GH_VIEW_EXIT (default
+  # 1 = not found), any later call exits GH_VIEW_EXIT_2 (defaults to
+  # GH_VIEW_EXIT). "release create ..." logs its full argv and exits
+  # GH_CREATE_EXIT (default 0 = success; set nonzero to simulate a
+  # "release already exists" create failure).
   cat > "${STUB_BIN}/gh" <<'EOF'
 #!/usr/bin/env bash
 if [ "$1" = "release" ] && [ "$2" = "view" ]; then
-  exit "${GH_VIEW_EXIT:-1}"
+  n=0
+  [ -f "${GH_VIEW_CALL_COUNT_FILE}" ] && n="$(cat "${GH_VIEW_CALL_COUNT_FILE}")"
+  n=$((n + 1))
+  echo "${n}" > "${GH_VIEW_CALL_COUNT_FILE}"
+  if [ "${n}" -eq 1 ]; then
+    exit "${GH_VIEW_EXIT:-1}"
+  fi
+  exit "${GH_VIEW_EXIT_2:-${GH_VIEW_EXIT:-1}}"
 fi
 if [ "$1" = "release" ] && [ "$2" = "create" ]; then
   echo "$*" >> "${CALL_LOG}"
-  exit 0
+  exit "${GH_CREATE_EXIT:-0}"
 fi
 echo "unexpected gh invocation: $*" >&2
 exit 1
@@ -61,7 +81,7 @@ exit 0
 EOF
   chmod +x "${STUB_BIN}/circleci-agent"
 
-  export CALL_LOG HALT_LOG
+  export CALL_LOG HALT_LOG GH_VIEW_CALL_COUNT_FILE
   export PATH="${STUB_BIN}:${PATH}"
 
   export PARAM_TAG_ENV="RELEASE_TAG"
@@ -191,4 +211,47 @@ teardown() {
 
   run cat "${CALL_LOG}"
   [[ "$output" == *"release create 2026.09.03-def5678 --notes-file /tmp/custom-notes.md"* ]]
+}
+
+@test "race-safe create (a): initial view finds nothing, create succeeds on the first try" {
+  export RELEASE_TAG="2026.09.03-abc1234"
+  export GH_VIEW_EXIT=1
+  export GH_CREATE_EXIT=0
+
+  run bash "${SCRIPT}"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"concurrently"* ]]
+
+  run cat "${CALL_LOG}"
+  [[ "$output" == *"release create 2026.09.03-abc1234 --generate-notes"* ]]
+}
+
+@test "race-safe create (b): create fails as already-existing, re-check confirms it, so it succeeds" {
+  export RELEASE_TAG="2026.09.03-abc1234"
+  # 1st gh release view (idempotency pre-check): not found.
+  export GH_VIEW_EXIT=1
+  # gh release create: fails, simulating a sibling job winning the race.
+  export GH_CREATE_EXIT=1
+  # 2nd gh release view (gh_release_create_race_safe's re-check): found.
+  export GH_VIEW_EXIT_2=0
+
+  run bash "${SCRIPT}"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Release 2026.09.03-abc1234 was created concurrently by another job; treating as success."* ]]
+}
+
+@test "race-safe create (c): create fails and the re-check also fails, so the original status wins" {
+  export RELEASE_TAG="2026.09.03-abc1234"
+  # 1st gh release view (idempotency pre-check): not found.
+  export GH_VIEW_EXIT=1
+  # gh release create: fails with a distinctive exit code, to assert it
+  # (and not some other status) is what ultimately propagates.
+  export GH_CREATE_EXIT=17
+  # 2nd gh release view (gh_release_create_race_safe's re-check): still
+  # not found, so this is a genuine failure, not a concurrent creation.
+  export GH_VIEW_EXIT_2=1
+
+  run bash "${SCRIPT}"
+  [ "$status" -eq 17 ]
+  [[ "$output" != *"concurrently"* ]]
 }

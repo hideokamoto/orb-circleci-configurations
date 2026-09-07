@@ -1,6 +1,44 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Runs `gh release create <tag> "$@"`, tolerating the race where another
+# job's `gh release create` for the same tag wins between our earlier
+# `gh release view` existence check and this call (both jobs can observe
+# "not found" and both then attempt to create). If the create fails, this
+# re-runs `gh release view "$tag"`; when that confirms the release now
+# exists, the concurrent creation is treated as success (a retried or
+# parallel job must not fail just because a sibling job won the race). Any
+# other failure (network error, permissions, a real "already exists" that
+# is not actually there on re-check, etc.) still fails with the original
+# `gh release create` exit status, so a genuine error is not swallowed.
+# Args: $1 = the release tag; the remaining args are passed straight
+#   through to `gh release create` after the tag (e.g. --notes-file
+#   "$notes_file", or --generate-notes [--notes-start-tag "$prev_tag"]).
+# Returns: 0 if `gh release create` itself succeeded, or if it failed but
+#   a follow-up `gh release view` confirms the release exists (concurrent
+#   creation by another job); otherwise the original nonzero exit status
+#   from `gh release create`.
+# Side effects: runs `gh release create` (network call; creates a real
+#   GitHub Release on success), and on failure also runs `gh release view`
+#   (network call); writes a progress message to stdout on the race path.
+gh_release_create_race_safe() {
+    local tag="$1"
+    shift
+    local create_status=0
+
+    gh release create "${tag}" "$@" || create_status=$?
+    if [ "${create_status}" -eq 0 ]; then
+        return 0
+    fi
+
+    if gh release view "${tag}" >/dev/null 2>&1; then
+        echo "Release ${tag} was created concurrently by another job; treating as success."
+        return 0
+    fi
+
+    return "${create_status}"
+}
+
 # Idempotently creates a GitHub Release for the tag left by resolve_deploy_tag
 # (env var named by PARAM_TAG_ENV, default RELEASE_TAG). Ported from the
 # "Skip if release already exists (idempotent retry)" and "Create GitHub
@@ -33,11 +71,14 @@ set -euo pipefail
 #   PARAM_NOTES_SOURCE_ENV  - name of the env var selecting the notes source
 #   PARAM_PREV_TAG_ENV      - name of the env var holding the previous tag
 #   PARAM_NOTES_FILE_ENV    - name of the env var holding the notes file path
-# Returns: 0 on success (including the idempotent-skip no-op path); exits 1
-#   if the resolved release tag is empty.
+# Returns: 0 on success (including the idempotent-skip no-op path, and the
+#   concurrent-creation race handled by gh_release_create_race_safe); exits
+#   1 if the resolved release tag is empty, or propagates a genuine
+#   `gh release create` failure's exit status.
 # Side effects: may run `gh release view` / `gh release create` (network
-#   call to GitHub), may call `circleci-agent step halt` (halts the step
-#   without failing the job), and writes progress messages to stdout/stderr.
+#   call to GitHub, possibly twice via gh_release_create_race_safe), may
+#   call `circleci-agent step halt` (halts the step without failing the
+#   job), and writes progress messages to stdout/stderr.
 create_github_release() {
     local tag_env tag
     local prev_tag_env prev_tag
@@ -68,12 +109,12 @@ create_github_release() {
     if [ "${notes_source}" = "deploy-diff-summaries" ]; then
         notes_file_env="${PARAM_NOTES_FILE_ENV}"
         notes_file="${!notes_file_env:-}"
-        gh release create "${tag}" --notes-file "${notes_file}"
+        gh_release_create_race_safe "${tag}" --notes-file "${notes_file}"
     elif [ -n "${prev_tag}" ]; then
-        gh release create "${tag}" --generate-notes --notes-start-tag "${prev_tag}"
+        gh_release_create_race_safe "${tag}" --generate-notes --notes-start-tag "${prev_tag}"
     else
         echo "No previous release tag; creating first release without --notes-start-tag."
-        gh release create "${tag}" --generate-notes
+        gh_release_create_race_safe "${tag}" --generate-notes
     fi
 }
 
