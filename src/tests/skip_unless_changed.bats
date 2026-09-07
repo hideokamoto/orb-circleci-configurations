@@ -316,3 +316,33 @@ commit_file() {
     [[ "$output" == *"halting this job"* ]]
     grep -q "^step halt$" "$HALT_LOG"
 }
+
+@test "an invalid head_revision does not halt (fail-safe)" {
+    commit_file "src/app.js" "v1"
+    BASE_SHA="$(git rev-parse HEAD)"
+
+    export PARAM_BASE_REVISION="$BASE_SHA"
+    # A well-formed but non-existent commit SHA: resolve_head returns it
+    # verbatim (it is non-empty), but it must fail the "does this resolve
+    # to a commit" check before changed_files ever runs `git diff` on it.
+    export PARAM_HEAD_REVISION="deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+
+    run bash "$SCRIPT"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Could not resolve a head revision; continuing (fail-safe)"* ]]
+    [ ! -f "$HALT_LOG" ]
+}
+
+@test "an empty head_revision with no CIRCLE_SHA1 does not halt (fail-safe)" {
+    commit_file "src/app.js" "v1"
+    BASE_SHA="$(git rev-parse HEAD)"
+
+    export PARAM_BASE_REVISION="$BASE_SHA"
+    export PARAM_HEAD_REVISION=""
+    unset CIRCLE_SHA1 || true
+
+    run bash "$SCRIPT"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Could not resolve a head revision; continuing (fail-safe)"* ]]
+    [ ! -f "$HALT_LOG" ]
+}

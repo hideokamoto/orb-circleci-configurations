@@ -98,7 +98,12 @@ resolve_base() {
 
 # Lists the paths that differ between $BASE and $HEAD (the globals set by
 # resolve_base/resolve_head). Takes no arguments. Prints one changed path
-# per line to stdout; has no other side effects.
+# per line to stdout; has no other side effects. Can fail (propagate a
+# non-zero exit) if `git diff` itself fails, e.g. on a revision that
+# stopped resolving between main's validation and this call; callers under
+# `set -e` must invoke this inside a conditional rather than a bare
+# assignment, so that failure can be treated as fail-safe rather than
+# aborting the whole script.
 changed_files() {
     git diff --name-only "$BASE" "$HEAD"
 }
@@ -156,14 +161,26 @@ should_halt() {
     esac
 }
 
-# Entry point: resolves head and base, logs the decision inputs, and either
-# halts the job (circleci-agent step halt) or lets it continue, per the
+# Entry point: resolves head and base, validates both actually resolve to
+# commits before diffing them, logs the decision inputs, and either halts
+# the job (circleci-agent step halt) or lets it continue, per the
 # fail-safe rules described at the top of this file. Takes no arguments and
 # reads the PARAM_* environment variables the orb command sets. Side
 # effects: writes progress/decision output to stdout, and calls
 # `circleci-agent step halt` when the skip condition is met.
 main() {
     HEAD="$(resolve_head)"
+
+    # Validated before resolve_base runs: an invalid/empty head (e.g.
+    # head_revision pointed at a bad ref, or CIRCLE_SHA1 unset with no
+    # head_revision override) must not reach `git diff` in changed_files
+    # below, which would fail and — unguarded — abort the whole script
+    # under `set -e` instead of falling through to fail-safe continue.
+    if [ -z "$HEAD" ] || ! git cat-file -e "${HEAD}^{commit}" 2>/dev/null; then
+        echo "Could not resolve a head revision; continuing (fail-safe). head: [${HEAD}]"
+        return 0
+    fi
+
     resolve_base
 
     if [ -z "$BASE" ] || [ "$BASE" = "$HEAD" ] || ! git cat-file -e "${BASE}" 2>/dev/null; then
@@ -174,7 +191,15 @@ main() {
     echo "Base revision: ${BASE} (source: ${BASE_SOURCE}) / Head revision: ${HEAD}"
 
     local changed
-    changed="$(changed_files)"
+    # Second line of defense: even though HEAD and BASE were just
+    # validated above, run the diff itself inside a conditional rather
+    # than a bare assignment, so that if `git diff` still fails for any
+    # reason, that failure is treated as fail-safe continue rather than
+    # aborting the script under `set -e`.
+    if ! changed="$(changed_files)"; then
+        echo "git diff between base and head failed; continuing (fail-safe)."
+        return 0
+    fi
     echo "Changed files:"
     printf '%s\n' "$changed"
 
