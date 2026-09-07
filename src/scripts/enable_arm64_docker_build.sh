@@ -176,6 +176,16 @@ install_cdk_docker_shim() {
 # effect within this still-running script -- so routing through
 # CDK_DOCKER_SHIM_PATH directly is required either way. Only invoked
 # from main() when the smoke_test parameter is true.
+#
+# The image reference is `cdk-arm64-smoke:<smoke_dir basename>` rather
+# than a fixed `cdk-arm64-smoke` tag, so a smoke build running here
+# can't collide with a same-named image already present on a shared
+# remote Docker daemon: with a fixed tag, a pre-existing
+# `cdk-arm64-smoke` would be silently reassigned to this throwaway
+# build and then deleted by the cleanup `docker rmi`, leaving whatever
+# referenced the original image with a dangling name. `mktemp -d`'s
+# default basename (`tmp.XXXXXXXXXX`) is already a valid Docker tag
+# (`[A-Za-z0-9_.-]`, not leading with `.`/`-`), so it is used as-is.
 # Arguments:
 #   $1 - base image to use as the smoke-test Dockerfile's FROM line
 #        (must provide an arm64 variant).
@@ -186,17 +196,18 @@ install_cdk_docker_shim() {
 #   Creates a temporary directory (via `mktemp -d`) containing a
 #   generated Dockerfile, which is left on disk. Builds (via the
 #   CDK_DOCKER shim, i.e. `docker buildx build --load`) and then removes
-#   a local image tagged `cdk-arm64-smoke`.
+#   a local image tagged `cdk-arm64-smoke:<smoke_dir basename>`.
 run_smoke_build() {
   local alpine_image="$1"
-  local smoke_dir
+  local smoke_dir smoke_image
   smoke_dir="$(mktemp -d)"
+  smoke_image="cdk-arm64-smoke:$(basename "${smoke_dir}")"
   printf '%s\n' \
     "FROM ${alpine_image}" \
     'RUN uname -m | grep -q aarch64' \
     > "${smoke_dir}/Dockerfile"
-  "${CDK_DOCKER_SHIM_PATH}" build --platform linux/arm64 -t cdk-arm64-smoke "${smoke_dir}"
-  docker rmi cdk-arm64-smoke
+  "${CDK_DOCKER_SHIM_PATH}" build --platform linux/arm64 -t "${smoke_image}" "${smoke_dir}"
+  docker rmi "${smoke_image}"
 }
 
 # Will not run if sourced for bats-core tests.

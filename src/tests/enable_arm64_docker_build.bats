@@ -164,7 +164,7 @@ teardown() {
   rm -f /tmp/cdk-docker
 }
 
-@test "runs the arm64 smoke build through the CDK_DOCKER shim (buildx build --load, selected builder) when smoke_test is true" {
+@test "runs the arm64 smoke build through the CDK_DOCKER shim with a unique, per-invocation image tag when smoke_test is true" {
   run bash "${SCRIPT}"
   [ "$status" -eq 0 ]
 
@@ -174,14 +174,21 @@ teardown() {
   # "build" line. This is what actually exercises the shim + selected
   # buildx builder path, rather than just a bare `docker build` that
   # would pass even if the shim script were broken.
-  grep -q "^docker buildx build --load --platform linux/arm64 -t cdk-arm64-smoke" "${CALL_LOG}"
-  ! grep -q "^docker build --platform linux/arm64 -t cdk-arm64-smoke" "${CALL_LOG}"
-  grep -qx "docker rmi cdk-arm64-smoke" "${CALL_LOG}"
+  build_line="$(grep '^docker buildx build --load --platform linux/arm64 -t cdk-arm64-smoke:' "${CALL_LOG}")"
+  [ -n "${build_line}" ]
+  ! grep -q "^docker build --platform linux/arm64 -t cdk-arm64-smoke:" "${CALL_LOG}"
+
+  # The tag is derived from the smoke_dir basename
+  # (cdk-arm64-smoke:tmp.XXXXXXXXXX), not the fixed `cdk-arm64-smoke`
+  # literal, so a same-named image already present on a shared remote
+  # Docker daemon is never silently reassigned/deleted by this smoke
+  # build. `docker rmi` must clean up that exact same generated tag.
+  build_tag="$(printf '%s\n' "${build_line}" | grep -oE 'cdk-arm64-smoke:[A-Za-z0-9._-]+')"
+  [[ "${build_tag}" == cdk-arm64-smoke:tmp.* ]]
+  grep -qx "docker rmi ${build_tag}" "${CALL_LOG}"
 
   shim_line=$(grep -n "export CDK_DOCKER" "${BASH_ENV}" | cut -d: -f1)
   [ -n "${shim_line}" ]
-  smoke_build_line=$(grep -n "^docker buildx build --load --platform linux/arm64 -t cdk-arm64-smoke" "${CALL_LOG}" | cut -d: -f1)
-  [ -n "${smoke_build_line}" ]
 }
 
 @test "skips the smoke build when smoke_test is false" {
@@ -190,9 +197,9 @@ teardown() {
   run bash "${SCRIPT}"
   [ "$status" -eq 0 ]
 
-  ! grep -q "^docker buildx build --load --platform linux/arm64 -t cdk-arm64-smoke" "${CALL_LOG}"
-  ! grep -q "^docker build --platform linux/arm64 -t cdk-arm64-smoke" "${CALL_LOG}"
-  ! grep -qx "docker rmi cdk-arm64-smoke" "${CALL_LOG}"
+  ! grep -q "^docker buildx build --load --platform linux/arm64 -t cdk-arm64-smoke:" "${CALL_LOG}"
+  ! grep -q "^docker build --platform linux/arm64 -t cdk-arm64-smoke:" "${CALL_LOG}"
+  ! grep -q "^docker rmi cdk-arm64-smoke:" "${CALL_LOG}"
 
   # The shim itself is still installed regardless of smoke_test.
   grep -qx 'export CDK_DOCKER=/tmp/cdk-docker' "${BASH_ENV}"
