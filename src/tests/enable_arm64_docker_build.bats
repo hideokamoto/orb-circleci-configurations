@@ -164,16 +164,23 @@ teardown() {
   rm -f /tmp/cdk-docker
 }
 
-@test "runs an arm64 smoke build after the shim is installed when smoke_test is true" {
+@test "runs the arm64 smoke build through the CDK_DOCKER shim (buildx build --load, selected builder) when smoke_test is true" {
   run bash "${SCRIPT}"
   [ "$status" -eq 0 ]
 
-  grep -q "^docker build --platform linux/arm64 -t cdk-arm64-smoke" "${CALL_LOG}"
+  # The smoke build must go through /tmp/cdk-docker (the shim), which
+  # itself execs `docker buildx build --load ...` -- so the PATH-stubbed
+  # docker binary records a "buildx build --load" line, not a plain
+  # "build" line. This is what actually exercises the shim + selected
+  # buildx builder path, rather than just a bare `docker build` that
+  # would pass even if the shim script were broken.
+  grep -q "^docker buildx build --load --platform linux/arm64 -t cdk-arm64-smoke" "${CALL_LOG}"
+  ! grep -q "^docker build --platform linux/arm64 -t cdk-arm64-smoke" "${CALL_LOG}"
   grep -qx "docker rmi cdk-arm64-smoke" "${CALL_LOG}"
 
   shim_line=$(grep -n "export CDK_DOCKER" "${BASH_ENV}" | cut -d: -f1)
   [ -n "${shim_line}" ]
-  smoke_build_line=$(grep -n "^docker build --platform linux/arm64 -t cdk-arm64-smoke" "${CALL_LOG}" | cut -d: -f1)
+  smoke_build_line=$(grep -n "^docker buildx build --load --platform linux/arm64 -t cdk-arm64-smoke" "${CALL_LOG}" | cut -d: -f1)
   [ -n "${smoke_build_line}" ]
 }
 
@@ -183,6 +190,7 @@ teardown() {
   run bash "${SCRIPT}"
   [ "$status" -eq 0 ]
 
+  ! grep -q "^docker buildx build --load --platform linux/arm64 -t cdk-arm64-smoke" "${CALL_LOG}"
   ! grep -q "^docker build --platform linux/arm64 -t cdk-arm64-smoke" "${CALL_LOG}"
   ! grep -qx "docker rmi cdk-arm64-smoke" "${CALL_LOG}"
 

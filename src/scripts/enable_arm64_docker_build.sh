@@ -23,6 +23,12 @@ set -euo pipefail
 # test) override it via the CIRCLECI_CLI environment variable.
 CIRCLECI_CLI="${CIRCLECI_CLI:-/usr/bin/circleci}"
 
+# Path the CDK_DOCKER shim is written to and invoked from. Kept as a
+# single named constant so install_cdk_docker_shim (which writes it) and
+# run_smoke_build (which must exercise it, not the bare `docker` binary,
+# to actually validate the buildx path CDK will use) can't drift apart.
+CDK_DOCKER_SHIM_PATH="/tmp/cdk-docker"
+
 # Entry point: resolves the PARAM_* environment variables the command
 # passes in, then runs the full bootstrap sequence (binfmt registration,
 # emulation assertion, buildx bootstrap, CDK_DOCKER shim install, and an
@@ -115,23 +121,28 @@ ensure_buildx_builder() {
   docker buildx inspect --bootstrap
 }
 
-# Writes an executable `docker` shim to /tmp/cdk-docker that rewrites a
-# `build` invocation into `docker buildx build --load` (so cross-platform
-# RUN steps work) and passes every other subcommand straight through to
-# the real `docker` binary, then exports CDK_DOCKER (pointing at the
-# shim) and DOCKER_BUILDKIT=1 to $BASH_ENV so later steps in the same
-# job pick them up. AWS CDK's DockerImageAsset invokes `docker` directly
-# and honors the CDK_DOCKER environment variable to redirect that
-# invocation, which is what makes the shim work without patching CDK.
+# Writes an executable `docker` shim to CDK_DOCKER_SHIM_PATH that
+# rewrites a `build` invocation into `docker buildx build --load` (using
+# whichever builder ensure_buildx_builder just selected as current, so
+# cross-platform RUN steps work) and passes every other subcommand
+# straight through to the real `docker` binary, then exports CDK_DOCKER
+# (pointing at the shim) and DOCKER_BUILDKIT=1 to $BASH_ENV so later
+# steps in the same job pick them up. AWS CDK's DockerImageAsset invokes
+# `docker` directly and honors the CDK_DOCKER environment variable to
+# redirect that invocation, which is what makes the shim work without
+# patching CDK.
 # Arguments:
 #   None.
 # Returns:
 #   0 on success; the calling shell exits non-zero (via `set -e`) if
 #   writing/chmod'ing the shim file fails.
 # Side effects:
-#   Writes an executable file to /tmp/cdk-docker (overwriting any prior
-#   copy). Appends two `export` lines to $BASH_ENV, which take effect for
-#   every subsequent `run` step in the same CircleCI job.
+#   Writes an executable file to CDK_DOCKER_SHIM_PATH (overwriting any
+#   prior copy). Appends two `export` lines to $BASH_ENV, which take
+#   effect for every subsequent `run` step in the same CircleCI job --
+#   NOT for this script's own remaining steps, which is why
+#   run_smoke_build below invokes CDK_DOCKER_SHIM_PATH directly rather
+#   than relying on $BASH_ENV having been sourced.
 install_cdk_docker_shim() {
   # shellcheck disable=SC2016
   # These single-quoted lines are the literal shim script body being
@@ -144,26 +155,37 @@ install_cdk_docker_shim() {
     '  exec docker buildx build --load "${@:2}"' \
     'fi' \
     'exec docker "$@"' \
-    > /tmp/cdk-docker
-  chmod +x /tmp/cdk-docker
-  echo 'export CDK_DOCKER=/tmp/cdk-docker' >> "$BASH_ENV"
+    > "${CDK_DOCKER_SHIM_PATH}"
+  chmod +x "${CDK_DOCKER_SHIM_PATH}"
+  echo "export CDK_DOCKER=${CDK_DOCKER_SHIM_PATH}" >> "$BASH_ENV"
   echo 'export DOCKER_BUILDKIT=1' >> "$BASH_ENV"
 }
 
-# Builds and immediately removes a throwaway single-RUN-step arm64 image,
-# reproducing CDK DockerImageAsset's failure mode (an arm64 `docker
-# build` with a RUN step) so a broken emulation/buildx setup is caught
-# here rather than deep inside a later `cdk deploy`. Only invoked from
-# main() when the smoke_test parameter is true.
+# Builds and immediately removes a throwaway single-RUN-step arm64
+# image, reproducing CDK DockerImageAsset's failure mode (an arm64
+# `docker build` with a RUN step) so a broken emulation/buildx setup is
+# caught here rather than deep inside a later `cdk deploy`. Deliberately
+# invokes the build through CDK_DOCKER_SHIM_PATH -- the same shim CDK
+# itself will call via the CDK_DOCKER env var -- rather than a bare
+# `docker build`, so this smoke test actually exercises the
+# `docker buildx build --load` + selected-builder path CDK will use,
+# not just a plain (non-buildx) build. Calling the bare `docker` binary
+# here would pass even if the shim script itself were broken, and
+# CDK_DOCKER/DOCKER_BUILDKIT are only appended to $BASH_ENV -- a file
+# CircleCI sources before each later step, not something already in
+# effect within this still-running script -- so routing through
+# CDK_DOCKER_SHIM_PATH directly is required either way. Only invoked
+# from main() when the smoke_test parameter is true.
 # Arguments:
 #   $1 - base image to use as the smoke-test Dockerfile's FROM line
 #        (must provide an arm64 variant).
 # Returns:
 #   0 on success; the calling shell exits non-zero (via `set -e`) if
-#   either the `docker build` or `docker rmi` fails.
+#   either the shim-routed build or the `docker rmi` fails.
 # Side effects:
 #   Creates a temporary directory (via `mktemp -d`) containing a
-#   generated Dockerfile, which is left on disk. Builds and then removes
+#   generated Dockerfile, which is left on disk. Builds (via the
+#   CDK_DOCKER shim, i.e. `docker buildx build --load`) and then removes
 #   a local image tagged `cdk-arm64-smoke`.
 run_smoke_build() {
   local alpine_image="$1"
@@ -173,7 +195,7 @@ run_smoke_build() {
     "FROM ${alpine_image}" \
     'RUN uname -m | grep -q aarch64' \
     > "${smoke_dir}/Dockerfile"
-  docker build --platform linux/arm64 -t cdk-arm64-smoke "${smoke_dir}"
+  "${CDK_DOCKER_SHIM_PATH}" build --platform linux/arm64 -t cdk-arm64-smoke "${smoke_dir}"
   docker rmi cdk-arm64-smoke
 }
 
