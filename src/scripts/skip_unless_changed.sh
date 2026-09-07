@@ -106,28 +106,48 @@ changed_files() {
 # Decides, from the changed paths on stdin (one per line) and
 # PARAM_MODE/PARAM_PATTERN, whether the job should be halted.
 # skip_if_only_matches halts only when every changed path matches pattern;
-# skip_unless_matches halts only when no changed path matches pattern.
-# Prints nothing. Returns (exits the function with) status 0 when the job
-# should halt, 1 when it should continue; exits the whole script with
-# status 1 if PARAM_MODE is not one of the two known values.
+# skip_unless_matches halts only when no changed path matches pattern. Both
+# branches read grep's actual exit status rather than treating "not 0" as
+# one thing: 0/1 are grep's normal "found"/"not found" outcomes, but 2 (or
+# higher) means grep itself failed — most likely PARAM_PATTERN is not a
+# valid extended regular expression — and that case, like every other
+# "cannot decide" case in this script, must fail safe toward continuing,
+# not toward halting. `--` guards both grep calls so a pattern starting
+# with `-` is never parsed as an option. Prints an error to stderr when
+# the pattern is invalid. Returns (exits the function with) status 0 when
+# the job should halt, 1 when it should continue (including on an invalid
+# pattern); exits the whole script with status 1 if PARAM_MODE is not one
+# of the two known values.
 should_halt() {
-    local pattern
+    local pattern rc
     pattern="$("$CIRCLECI_CLI" env subst "${PARAM_PATTERN}")"
     case "$PARAM_MODE" in
         skip_if_only_matches)
-            # Halt only when every changed path matches pattern, i.e. none
-            # of them fail to match.
-            if grep -qvE "$pattern"; then
-                return 1
-            fi
-            return 0
+            # grep -v exits 0 when it found a path that does NOT match
+            # (so at least one path is unrelated -> continue), 1 when
+            # every path matched (-> halt), and >=2 on a grep error.
+            grep -qvE -- "$pattern" && rc=0 || rc=$?
+            case "$rc" in
+                0) return 1 ;;
+                1) return 0 ;;
+                *)
+                    echo "Invalid pattern (grep exited ${rc}); continuing (fail-safe): ${pattern}" >&2
+                    return 1
+                    ;;
+            esac
             ;;
         skip_unless_matches)
-            # Halt only when no changed path matches pattern.
-            if grep -qE "$pattern"; then
-                return 1
-            fi
-            return 0
+            # grep exits 0 when it found a matching path (-> continue), 1
+            # when none matched (-> halt), and >=2 on a grep error.
+            grep -qE -- "$pattern" && rc=0 || rc=$?
+            case "$rc" in
+                0) return 1 ;;
+                1) return 0 ;;
+                *)
+                    echo "Invalid pattern (grep exited ${rc}); continuing (fail-safe): ${pattern}" >&2
+                    return 1
+                    ;;
+            esac
             ;;
         *)
             echo "Unknown PARAM_MODE: ${PARAM_MODE}" >&2

@@ -279,3 +279,40 @@ commit_file() {
     [[ "$output" == *"do not match the skip condition"* ]]
     [ ! -f "$HALT_LOG" ]
 }
+
+@test "an invalid pattern does not halt (fail-safe) and logs an error" {
+    commit_file "src/app.js" "v1"
+    BASE_SHA="$(git rev-parse HEAD)"
+    commit_file "src/app.js" "v2"
+    HEAD_SHA="$(git rev-parse HEAD)"
+
+    export PARAM_BASE_REVISION="$BASE_SHA"
+    export PARAM_HEAD_REVISION="$HEAD_SHA"
+    export CIRCLE_SHA1="$HEAD_SHA"
+    export PARAM_MODE="skip_if_only_matches"
+    # '[' is not a valid extended regular expression: grep exits >=2.
+    export PARAM_PATTERN='['
+
+    run bash "$SCRIPT"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Invalid pattern"* ]]
+    [ ! -f "$HALT_LOG" ]
+}
+
+@test "a pattern starting with a dash is treated as a pattern, not a grep option" {
+    commit_file "notes-docs.md" "one"
+    BASE_SHA="$(git rev-parse HEAD)"
+    commit_file "readme-docs.md" "two"
+    HEAD_SHA="$(git rev-parse HEAD)"
+
+    export PARAM_BASE_REVISION="$BASE_SHA"
+    export PARAM_HEAD_REVISION="$HEAD_SHA"
+    export CIRCLE_SHA1="$HEAD_SHA"
+    export PARAM_MODE="skip_if_only_matches"
+    export PARAM_PATTERN='-docs'
+
+    run bash "$SCRIPT"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"halting this job"* ]]
+    grep -q "^step halt$" "$HALT_LOG"
+}
