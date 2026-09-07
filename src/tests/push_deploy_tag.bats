@@ -33,11 +33,11 @@
 #   the hook's final command or explicitly checked).
 # Side effects:
 #   Creates a temp directory tree (TEST_DIR containing REMOTE_DIR,
-#   WORK_DIR, a throwaway HOME, and the CIRCLECI_CLI stub script), changes
-#   the shell's working directory to WORK_DIR, and exports CIRCLE_SHA1,
-#   CIRCLECI_CLI, HOME, and GIT_CONFIG_NOSYSTEM for the duration of the
-#   test (the latter two isolate git from this machine's real
-#   ~/.gitconfig).
+#   WORK_DIR, a throwaway HOME and XDG_CONFIG_HOME, and the CIRCLECI_CLI
+#   stub script), changes the shell's working directory to WORK_DIR, and
+#   exports CIRCLE_SHA1, CIRCLECI_CLI, HOME, XDG_CONFIG_HOME, and
+#   GIT_CONFIG_NOSYSTEM (and unsets GIT_CONFIG_GLOBAL) for the duration of
+#   the test, to isolate git from this machine's real user-level config.
 setup() {
   SCRIPT="$(cd "$(dirname "$BATS_TEST_FILENAME")/../.." && pwd)/src/scripts/push_deploy_tag.sh"
 
@@ -45,14 +45,20 @@ setup() {
   REMOTE_DIR="${TEST_DIR}/remote.git"
   WORK_DIR="${TEST_DIR}/work"
 
-  # Isolate git from this machine's real ~/.gitconfig for the whole test
-  # (a throwaway HOME, plus GIT_CONFIG_NOSYSTEM): the ambient config in
-  # this environment sets push.negotiate=true and commit.gpgsign=true,
-  # neither of which this disposable local-remote fixture needs, and the
-  # former intermittently prints a spurious "push negotiation failed"
-  # warning that has no bearing on these tests.
+  # Isolate git from this machine's real user-level config for the whole
+  # test: the ambient config in this environment sets push.negotiate=true
+  # and commit.gpgsign=true, neither of which this disposable local-remote
+  # fixture needs, and the former intermittently prints a spurious "push
+  # negotiation failed" warning that has no bearing on these tests.
+  # HOME + GIT_CONFIG_NOSYSTEM alone are not enough: git also reads
+  # $XDG_CONFIG_HOME/git/config (inherited from the real environment if
+  # left unset) and $GIT_CONFIG_GLOBAL (an explicit override, if the real
+  # environment happens to export one), so both are neutralized too.
   export HOME="${TEST_DIR}/home"
   mkdir -p "${HOME}"
+  export XDG_CONFIG_HOME="${TEST_DIR}/xdg"
+  mkdir -p "${XDG_CONFIG_HOME}"
+  unset GIT_CONFIG_GLOBAL
   export GIT_CONFIG_NOSYSTEM=1
 
   git init --quiet --bare "${REMOTE_DIR}"
@@ -155,6 +161,38 @@ teardown() {
   run git ls-remote --tags origin
   count="$(printf '%s\n' "$output" | grep -c "${expected_tag}" || true)"
   [ "$count" -eq 1 ]
+}
+
+@test "does not treat a similarly-named tag as already existing" {
+  export PARAM_DATE_FORMAT="%Y.%m.%d"
+  export PARAM_SHA_LENGTH="7"
+
+  expected_tag="$(date -u +%Y.%m.%d)-${CIRCLE_SHA1:0:7}"
+
+  # Only a similarly-named decoy tag exists on the remote —
+  # "refs/tags/${expected_tag}" itself does not. Before the exact-match
+  # fix, `git ls-remote --tags origin "${expected_tag}" | grep -q
+  # "${expected_tag}"` would have matched this decoy too (its ref name
+  # contains "${expected_tag}" as a substring), wrongly short-circuiting
+  # to the skip path without ever creating or pushing the real tag.
+  git tag "${expected_tag}-suffix"
+  git push --quiet origin "${expected_tag}-suffix"
+  git tag -d "${expected_tag}-suffix" >/dev/null
+
+  run push_deploy_tag
+  [ "$status" -eq 0 ]
+  # must have taken the create path, not the skip path
+  [[ "$output" != *"already exists on remote, skipping"* ]]
+
+  # the real tag now exists on the remote, exactly
+  run git ls-remote --tags --refs origin "refs/tags/${expected_tag}"
+  [ "$status" -eq 0 ]
+  [[ "$output" == "${CIRCLE_SHA1}"$'\t'"refs/tags/${expected_tag}" ]]
+
+  # ...alongside the pre-existing decoy, i.e. nothing was clobbered
+  run git ls-remote --tags origin
+  count="$(printf '%s\n' "$output" | grep -c "${expected_tag}" || true)"
+  [ "$count" -eq 2 ]
 }
 
 @test "honors a custom date_format and sha_length" {
