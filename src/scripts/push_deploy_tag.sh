@@ -80,13 +80,13 @@ push_deploy_tag() {
     tag="$(date -u "+${date_format}")-${CIRCLE_SHA1:0:sha_length}"
 
     # Exact-match the ref name (rather than the previous `grep -q "${tag}"`
-    # substring test): `git ls-remote`'s pattern matching is tail-anchored,
-    # so an unqualified "${tag}" pattern also matches longer refs the tag
-    # name happens to be a suffix of (or a nested ref like
-    # "refs/tags/${tag}/x"), and `grep -q "${tag}"` would then accept that
-    # as "already exists" without ever having actually pushed
-    # "refs/tags/${tag}" itself. `--refs` drops peeled `^{}` entries for
-    # annotated tags so they can't cause a spurious duplicate match either.
+    # substring test): `git ls-remote`'s pattern matching is tail-anchored
+    # at "/" boundaries, so an unqualified "${tag}" pattern also matches
+    # any ref that has it as a slash-separated tail component — e.g.
+    # "refs/tags/decoy/${tag}" — even though "refs/tags/${tag}" itself was
+    # never pushed, and `grep -q "${tag}"` would then accept that as
+    # "already exists". `--refs` drops peeled `^{}` entries for annotated
+    # tags so they can't cause a spurious duplicate match either.
     if git ls-remote --tags --refs origin "refs/tags/${tag}" |
         awk -v expected="refs/tags/${tag}" '$2 == expected { found=1 } END { exit !found }'; then
         echo "Tag ${tag} already exists on remote, skipping."

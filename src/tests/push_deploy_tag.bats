@@ -170,14 +170,20 @@ teardown() {
   expected_tag="$(date -u +%Y.%m.%d)-${CIRCLE_SHA1:0:7}"
 
   # Only a similarly-named decoy tag exists on the remote —
-  # "refs/tags/${expected_tag}" itself does not. Before the exact-match
+  # "refs/tags/${expected_tag}" itself does not. `git ls-remote`'s pattern
+  # matching is tail-anchored at "/" boundaries, so "decoy/${expected_tag}"
+  # (a slash-separated prefix in front of the real tag name) is what
+  # actually reproduces the bug the exact-match fix addresses: before that
   # fix, `git ls-remote --tags origin "${expected_tag}" | grep -q
-  # "${expected_tag}"` would have matched this decoy too (its ref name
-  # contains "${expected_tag}" as a substring), wrongly short-circuiting
-  # to the skip path without ever creating or pushing the real tag.
-  git tag "${expected_tag}-suffix"
-  git push --quiet origin "${expected_tag}-suffix"
-  git tag -d "${expected_tag}-suffix" >/dev/null
+  # "${expected_tag}"` matched "refs/tags/decoy/${expected_tag}" too,
+  # wrongly short-circuiting to the skip path without ever creating or
+  # pushing the real tag. (A plain "${expected_tag}-suffix" decoy, by
+  # contrast, is *not* tail-anchor-matched by an unqualified
+  # "${expected_tag}" pattern in the first place, so it wouldn't have
+  # exercised the old bug at all.)
+  git tag "decoy/${expected_tag}"
+  git push --quiet origin "decoy/${expected_tag}"
+  git tag -d "decoy/${expected_tag}" >/dev/null
 
   run push_deploy_tag
   [ "$status" -eq 0 ]
