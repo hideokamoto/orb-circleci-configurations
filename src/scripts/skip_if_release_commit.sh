@@ -50,7 +50,7 @@ main() {
     skip_ci_regex="$("${CIRCLECI_CLI}" env subst "${PARAM_SKIP_CI_REGEX}")"
 
     commit_subject="$(git log -1 --pretty=%s)"
-    if echo "${commit_subject}" | grep -qE "${release_subject_regex}"; then
+    if echo "${commit_subject}" | grep -qE -- "${release_subject_regex}"; then
         echo "Release-please version commit detected (subject: ${commit_subject}) — skipping."
         circleci-agent step halt
         # In a real job, `circleci-agent step halt` terminates step
@@ -60,7 +60,7 @@ main() {
     fi
 
     commit_message="$(git log -1 --pretty=%B)"
-    if echo "${commit_message}" | grep -qE "${skip_ci_regex}"; then
+    if echo "${commit_message}" | grep -qE -- "${skip_ci_regex}"; then
         echo "Skip CI marker detected in commit message — skipping."
         circleci-agent step halt
         return 0

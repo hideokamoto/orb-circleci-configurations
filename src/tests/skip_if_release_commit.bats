@@ -147,6 +147,20 @@ run_script() {
     [ "$(wc -l <"${HALT_LOG}")" -eq 1 ]
 }
 
+@test "halts on a custom release_subject_regex that begins with a dash" {
+    # Guards the `grep -qE -- "${release_subject_regex}"` option
+    # terminator: without it, a parameter value starting with `-` (like
+    # `-release` here) would be parsed by grep as a flag instead of a
+    # pattern.
+    export PARAM_RELEASE_SUBJECT_REGEX='-release'
+    commit "-release: x"
+
+    run_script
+
+    [ "$status" -eq 0 ]
+    [ "$(wc -l <"${HALT_LOG}")" -eq 1 ]
+}
+
 @test "does not halt when a release commit is only mentioned in the body" {
     commit "fix: retry release upload
 
