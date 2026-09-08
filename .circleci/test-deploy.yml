@@ -21,6 +21,11 @@ release-filters: &release-filters
   tags:
     only: /^v[0-9]+\.[0-9]+\.[0-9]+$/
 
+# Single source of truth for the cdkd version exercised by
+# test_install_cdkd. Keep this in sync with the install_cdkd command's
+# default `version` parameter (src/commands/install_cdkd.yml).
+cdkd-test-version: &cdkd_test_version "0.280.15"
+
 jobs:
   # Exercise the orb's executors directly, so a packaging or parameter
   # regression in either one fails test-deploy before publish.
@@ -42,18 +47,22 @@ jobs:
           name: Confirm trivy resolves to a working Trivy image
           command: trivy --version
   # Command-test for install_cdkd: run it with its default (pinned) version
-  # and assert `cdkd --version` reports exactly that version.
+  # and assert `cdkd --version` reports exactly that version (not merely a
+  # prefix of it — "0.280.150" must fail this check).
   test_install_cdkd:
     executor:
       name: node/default
       tag: "22.14"
     steps:
       - configurations/install_cdkd:
-          version: "0.280.15"
+          version: *cdkd_test_version
       - run:
-          name: Assert cdkd --version reports the pinned version
+          name: Assert cdkd --version reports exactly the pinned version
+          environment:
+            EXPECTED_CDKD_VERSION: *cdkd_test_version
           command: |
-            cdkd --version | grep -qF "0.280.15"
+            actual="$(cdkd --version)"
+            test "${actual}" = "${EXPECTED_CDKD_VERSION}"
 workflows:
   test-deploy:
     jobs:
