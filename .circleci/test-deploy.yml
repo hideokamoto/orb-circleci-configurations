@@ -53,7 +53,11 @@ jobs:
           name: Install a stub curl and a fixture SBOM file
           command: |
             mkdir -p /tmp/stub-bin
-            cat > /tmp/stub-bin/curl <<'CURL_STUB'
+            # CircleCI config v2.1 parses a bare \<< as parameter/pipeline-value
+            # syntax, so this heredoc's \<< must be escaped as \<< here.
+            # `circleci config process` unescapes it back to \<< before the
+            # shell sees it; without the backslash, config compilation fails.
+            cat > /tmp/stub-bin/curl \<<'CURL_STUB'
             #!/usr/bin/env bash
             printf '%s\n' "$@" > /tmp/curl-calls.log
             exit 0
