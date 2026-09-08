@@ -52,7 +52,7 @@ jobs:
           name: Write a minimal CDK-app-shaped fixture (synth script reports CDK_DEFAULT_* env)
           command: |
             mkdir -p /tmp/cdk-synth-fixture
-            cat > package.json \<<'PKGJSON'
+            cat > package.json <<'PKGJSON'
             {
               "name": "cdk-synth-fixture",
               "private": true,

@@ -44,8 +44,8 @@ cdk_synth() {
   local pkg_manager="$3"
   local synth_script="$4"
 
-  export CDK_DEFAULT_ACCOUNT="${CDK_DEFAULT_ACCOUNT:-${account_placeholder}}"
-  export CDK_DEFAULT_REGION="${CDK_DEFAULT_REGION:-${region_placeholder}}"
+  export CDK_DEFAULT_ACCOUNT="${CDK_DEFAULT_ACCOUNT-${account_placeholder}}"
+  export CDK_DEFAULT_REGION="${CDK_DEFAULT_REGION-${region_placeholder}}"
 
   "${pkg_manager}" run "${synth_script}"
 }

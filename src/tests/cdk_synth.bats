@@ -111,6 +111,21 @@ teardown() {
   echo "$output" | grep -qx "CDK_DEFAULT_REGION=ap-northeast-1"
 }
 
+@test "does not replace an explicitly empty CDK_DEFAULT_ACCOUNT / CDK_DEFAULT_REGION with the placeholder" {
+  # ${VAR-fallback} (no colon) only falls back when VAR is unset, unlike
+  # ${VAR:-fallback} which also falls back on an explicitly empty value. A
+  # job that deliberately exports an empty string must keep it.
+  export CDK_DEFAULT_ACCOUNT=""
+  export CDK_DEFAULT_REGION=""
+
+  cdk_synth "123456789012" "us-east-1" "fake_pkg_manager" "synth"
+
+  run cat "$CALL_LOG"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -qx "CDK_DEFAULT_ACCOUNT="
+  echo "$output" | grep -qx "CDK_DEFAULT_REGION="
+}
+
 @test "invokes '<pkg_manager> run <synth_script>'" {
   cdk_synth "123456789012" "us-east-1" "fake_pkg_manager" "synth"
 
