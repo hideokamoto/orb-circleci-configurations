@@ -8,6 +8,12 @@ description: >
   reinstall rather than trusting the cache. Dependency caching (keyed on
   bun.lockb) is intentionally out of scope here and left to the caller /
   a separate command, since it is per-project rather than per-toolchain.
+  Caveat: CircleCI caches are immutable, so if a cache is ever saved with a
+  broken or mismatched bun under it, a later reinstall will NOT overwrite
+  that existing cache entry (save_cache to an already-populated key is a
+  no-op) -- every future run will keep restoring the same broken cache and
+  reinstalling on top of it. If that happens, bump cache_key_prefix (e.g.
+  "v1-bun-toolchain" -> "v2-bun-toolchain") to start a fresh cache key.
 
 parameters:
   version:
@@ -31,7 +37,11 @@ parameters:
       Prefix for the toolchain cache key. The full key is
       "<cache_key_prefix>-<version>", so bumping the version naturally
       busts the cache. This key is for the bun binary only; it is
-      independent from any dependency (bun.lockb) cache key.
+      independent from any dependency (bun.lockb) cache key. CircleCI
+      caches are immutable (save_cache is a no-op once a key is already
+      populated), so a cache that ever got saved with a broken/mismatched
+      bun stays broken forever under that key; bump this prefix (e.g. "v1"
+      -> "v2") to deliberately invalidate it and start a fresh key.
 
 steps:
   - when:

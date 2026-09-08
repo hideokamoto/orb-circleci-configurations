@@ -121,6 +121,8 @@ STALE_BUN
   [ "$status" -eq 0 ]
 
   echo "$output" | grep -q "Cached bun 9.9.9 != expected 1.3.14; reinstalling."
+  echo "$output" | grep -q "Warning: CircleCI caches are immutable"
+  echo "$output" | grep -q "Bump cache_key_prefix"
   [ "$(wc -l < "${CURL_CALL_LOG}")" -eq 1 ]
   [ "$("${HOME}/.bun/bin/bun" --version)" = "v1.3.14" ]
 }

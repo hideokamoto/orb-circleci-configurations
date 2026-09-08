@@ -51,8 +51,12 @@ install_bun() {
 #   May install/reinstall bun under ~/.bun (see install_bun). Appends a
 #   PATH export for ~/.bun/bin to $BASH_ENV and sources it into the current
 #   shell so `bun` resolves for the rest of this process and later steps.
-#   On a version mismatch, deletes ~/.bun before reinstalling. Prints
-#   progress/diagnostic messages to stdout.
+#   On a version mismatch, deletes ~/.bun before reinstalling, and prints a
+#   stderr warning that (because CircleCI caches are immutable) this
+#   reinstall will not update whatever cache was already saved under the
+#   caller's cache_key_prefix, so the same mismatch will recur on every
+#   future restore until cache_key_prefix is bumped. Prints
+#   progress/diagnostic messages to stdout/stderr.
 main() {
   local expected_version
   expected_version="$("${CIRCLECI_CLI}" env subst "${PARAM_VERSION}")"
@@ -70,6 +74,7 @@ main() {
 
   if [ "$actual_version" != "$expected_version" ]; then
     echo "Cached bun ${actual_version} != expected ${expected_version}; reinstalling."
+    echo "Warning: CircleCI caches are immutable, so this reinstall will not update the cache already saved under the caller's cache_key_prefix; the same mismatch will be restored and reinstalled again next time. Bump cache_key_prefix (e.g. v1 -> v2) to start a fresh cache key." >&2
     rm -rf "${HOME}/.bun"
     install_bun "${expected_version}"
     actual_version="$(bun --version | sed 's/^v//')"
