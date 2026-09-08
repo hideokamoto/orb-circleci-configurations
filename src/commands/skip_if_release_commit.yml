@@ -1,0 +1,38 @@
+description: >
+  Halt the current job when the current commit is a release-please version
+  bump commit, or when the commit message carries an explicit CI-skip
+  marker. Must be called after `checkout`, since it inspects `git log`
+  directly rather than a CircleCI pipeline value — CircleCI has no built-in
+  pipeline value for the commit message. The release-commit check is
+  intentionally scoped to the commit *subject* (first line) only, matched
+  with a leading-anchor regex: matching against the full commit body instead
+  would false-positive on ordinary commits whose body merely references a
+  release-please commit (for example, a follow-up commit whose body reads
+  "Follow-up to the chore(main): release 1.2.0 commit ..."). The CI-skip
+  marker check intentionally scans the full commit message body, matching
+  the common `[skip ci]` / `[ci skip]` convention used across CI providers.
+
+parameters:
+  release_subject_regex:
+    type: string
+    default: '^chore(\([^)]+\))?: release'
+    description: >
+      Extended regex (matched with `grep -E`) applied to the commit subject
+      (first line) only. Matches release-please's default version-bump
+      commit subject, e.g. "chore(main): release 1.2.3" or
+      "chore: release 1.2.3".
+  skip_ci_regex:
+    type: string
+    default: '\[skip ci\]|\[ci skip\]|circleci\[skip\]|circleci:skip'
+    description: >
+      Extended regex (matched with `grep -E`) applied to the full commit
+      message body. Halts the job when any of the common CI-skip markers is
+      present anywhere in the commit message.
+
+steps:
+  - run:
+      name: Skip if release-please commit or CI-skip marker
+      environment:
+        PARAM_RELEASE_SUBJECT_REGEX: <<parameters.release_subject_regex>>
+        PARAM_SKIP_CI_REGEX: <<parameters.skip_ci_regex>>
+      command: <<include(scripts/skip_if_release_commit.sh)>>

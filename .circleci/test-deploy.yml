@@ -49,6 +49,18 @@ jobs:
       - run:
           name: Confirm trivy resolves to a working Trivy image
           command: trivy --version
+  # Exercises skip_if_release_commit on the ordinary (non-release,
+  # non-skip-marker) commit that CI itself runs on, so the non-halting
+  # path is covered end-to-end. The halting paths are covered by
+  # src/tests/skip_if_release_commit.bats against a synthetic git history.
+  test_skip_if_release_commit:
+    executor: configurations/base_pinned
+    steps:
+      - checkout
+      - configurations/skip_if_release_commit
+      - run:
+          name: Confirm the job was not halted
+          command: echo "skip_if_release_commit did not halt this job, as expected"
 workflows:
   test-deploy:
     jobs:
@@ -57,6 +69,8 @@ workflows:
       - test_base_pinned_executor:
           filters: *filters
       - test_trivy_executor:
+          filters: *filters
+      - test_skip_if_release_commit:
           filters: *filters
       # The orb must be re-packed for publishing, and saved to the workspace.
       - orb-tools/pack:
@@ -70,5 +84,6 @@ workflows:
             - orb-tools/pack
             - test_base_pinned_executor
             - test_trivy_executor
+            - test_skip_if_release_commit
           context: orb-publishing
           filters: *release-filters
