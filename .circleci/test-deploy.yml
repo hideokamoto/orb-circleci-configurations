@@ -52,11 +52,12 @@ jobs:
           name: Write a minimal CDK-app-shaped fixture (synth script reports CDK_DEFAULT_* env)
           command: |
             mkdir -p /tmp/cdk-synth-fixture
-            # CircleCI config v2.1 parses "<<" as parameter/pipeline-value
-            # syntax, so a literal heredoc operator must be escaped as "\<<"
-            # here or the config fails to compile ("Unclosed '<<' tag").
-            # `circleci config process` restores it to a plain "<<" before
-            # the shell ever sees it, so the heredoc below runs correctly.
+            # CircleCI config v2.1 treats a doubled angle-bracket sequence as
+            # parameter/pipeline-value syntax, so a literal heredoc start
+            # here must be backslash-escaped, or the config fails to
+            # compile with an "Unclosed tag" error. `circleci config
+            # process` strips that escaping backslash before the shell ever
+            # sees this line, so the heredoc below still runs correctly.
             cat > package.json \<<'PKGJSON'
             {
               "name": "cdk-synth-fixture",
