@@ -15,9 +15,11 @@ parameters:
     type: string
     default: '^[0-9]{4}\.[0-9]{2}\.[0-9]{2}-[0-9a-f]{7}$'
     description: >
-      Extended regular expression a candidate tag must fully match to be
-      considered a deploy tag. Defaults to the `YYYY.MM.DD-<sha7>` format
-      produced by this orb's tag-pushing command.
+      Extended regular expression a candidate tag must fully match (its
+      entire name, not a substring — `^`/`$` anchors are not required, the
+      match is anchored implicitly) to be considered a deploy tag. Defaults
+      to the `YYYY.MM.DD-<sha7>` format produced by this orb's
+      tag-pushing command.
   commit:
     type: string
     default: ""
@@ -29,7 +31,9 @@ parameters:
     default: RELEASE_TAG
     description: >
       Name of the environment variable exported to `$BASH_ENV` with the
-      resolved tag value.
+      resolved tag value. Must be a valid Bash identifier
+      (`^[A-Za-z_][A-Za-z0-9_]*$`); the command fails with a non-zero exit
+      if it is not.
   halt_if_missing:
     type: boolean
     default: true

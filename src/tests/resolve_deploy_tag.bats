@@ -118,7 +118,7 @@ teardown() {
 
     [ "$status" -eq 0 ]
     [ ! -f "$HALT_LOG" ]
-    grep -q 'export RELEASE_TAG="2026.09.03-aaaaaaa"' "$BASH_ENV"
+    grep -q 'export RELEASE_TAG=2026.09.03-aaaaaaa' "$BASH_ENV"
 }
 
 @test "ignores tags that do not match tag_regex" {
@@ -128,7 +128,7 @@ teardown() {
     run bash "$SCRIPT"
 
     [ "$status" -eq 0 ]
-    grep -q 'export RELEASE_TAG="2026.01.01-1234567"' "$BASH_ENV"
+    grep -q 'export RELEASE_TAG=2026.01.01-1234567' "$BASH_ENV"
     ! grep -q "release-v9" "$BASH_ENV"
 }
 
@@ -138,7 +138,7 @@ teardown() {
     run bash "$SCRIPT"
 
     [ "$status" -eq 0 ]
-    grep -q 'export RELEASE_TAG="2026.05.05-deadbee"' "$BASH_ENV"
+    grep -q 'export RELEASE_TAG=2026.05.05-deadbee' "$BASH_ENV"
 }
 
 @test "honors a custom output_env name" {
@@ -148,7 +148,7 @@ teardown() {
     run bash "$SCRIPT"
 
     [ "$status" -eq 0 ]
-    grep -q 'export MY_TAG="2026.05.05-deadbee"' "$BASH_ENV"
+    grep -q 'export MY_TAG=2026.05.05-deadbee' "$BASH_ENV"
 }
 
 @test "resolves an explicit commit parameter instead of CIRCLE_SHA1" {
@@ -164,5 +164,90 @@ teardown() {
     run bash "$SCRIPT"
 
     [ "$status" -eq 0 ]
-    grep -q 'export RELEASE_TAG="2026.06.06-cafebee"' "$BASH_ENV"
+    grep -q 'export RELEASE_TAG=2026.06.06-cafebee' "$BASH_ENV"
+}
+
+@test "fails without halting or exporting when tag_regex is an invalid ERE" {
+    git tag 2026.09.03-abcdef0
+    export PARAM_TAG_REGEX='['
+
+    run bash "$SCRIPT"
+
+    [ "$status" -ne 0 ]
+    [ ! -f "$HALT_LOG" ]
+    ! grep -q "RELEASE_TAG" "$BASH_ENV"
+}
+
+@test "does not select a tag that only partially matches an unanchored custom tag_regex" {
+    git tag v1.0.0
+
+    export PARAM_TAG_REGEX='v1'
+
+    run bash "$SCRIPT"
+
+    [ "$status" -eq 0 ]
+    [ -f "$HALT_LOG" ]
+    ! grep -q "RELEASE_TAG" "$BASH_ENV"
+}
+
+@test "fails when git tag --points-at itself fails" {
+    GIT_REAL="$(command -v git)"
+    cat > "$BIN_DIR/git" <<EOF
+#!/usr/bin/env bash
+if [ "\$1" = "tag" ] && [ "\$2" = "--points-at" ]; then
+    exit 128
+fi
+exec "$GIT_REAL" "\$@"
+EOF
+    chmod +x "$BIN_DIR/git"
+
+    run bash "$SCRIPT"
+
+    [ "$status" -ne 0 ]
+    [ ! -f "$HALT_LOG" ]
+    ! grep -q "RELEASE_TAG" "$BASH_ENV"
+}
+
+@test "fails without halting or exporting when output_env is not a valid Bash identifier" {
+    git tag 2026.09.03-abcdef0
+    export PARAM_OUTPUT_ENV="BAD-NAME"
+
+    run bash "$SCRIPT"
+
+    [ "$status" -ne 0 ]
+    [ ! -f "$HALT_LOG" ]
+    [ ! -s "$BASH_ENV" ]
+}
+
+@test "fails when output_env starts with a digit" {
+    git tag 2026.09.03-abcdef0
+    export PARAM_OUTPUT_ENV="1ABC"
+
+    run bash "$SCRIPT"
+
+    [ "$status" -ne 0 ]
+    [ ! -f "$HALT_LOG" ]
+    [ ! -s "$BASH_ENV" ]
+}
+
+@test "does not execute command substitution embedded in a tag name when BASH_ENV is sourced" {
+    # A valid git ref (per git-check-ref-format; refs cannot contain spaces
+    # or ':', which rules out most shell commands with arguments, but a
+    # bare `$(id)` needs neither) that would run a command if it were
+    # written unescaped into $BASH_ENV and later sourced.
+    TAG='release-$(id)'
+    git tag -- "$TAG"
+
+    export PARAM_TAG_REGEX='^release-.*$'
+
+    run bash "$SCRIPT"
+
+    [ "$status" -eq 0 ]
+    (
+        set -eu
+        . "$BASH_ENV"
+        # If command substitution had run, RELEASE_TAG would hold `id`'s
+        # output instead of the literal tag text.
+        [ "$RELEASE_TAG" = "$TAG" ]
+    )
 }
