@@ -110,53 +110,40 @@ changed_files() {
 
 # Decides, from the changed paths on stdin (one per line) and
 # PARAM_MODE/PARAM_PATTERN, whether the job should be halted.
-# skip_if_only_matches halts only when every changed path matches pattern;
-# skip_unless_matches halts only when no changed path matches pattern. Both
-# branches read grep's actual exit status rather than treating "not 0" as
-# one thing: 0/1 are grep's normal "found"/"not found" outcomes, but 2 (or
-# higher) means grep itself failed — most likely PARAM_PATTERN is not a
-# valid extended regular expression — and that case, like every other
-# "cannot decide" case in this script, must fail safe toward continuing,
-# not toward halting. `--` guards both grep calls so a pattern starting
-# with `-` is never parsed as an option. Prints an error to stderr when
-# the pattern is invalid. Returns (exits the function with) status 0 when
-# the job should halt, 1 when it should continue (including on an invalid
-# pattern); exits the whole script with status 1 if PARAM_MODE is not one
-# of the two known values.
+# skip_if_only_matches halts only when every changed path matches pattern
+# (grep -v, inverted match: exits 0 when it found a path that does NOT
+# match -> continue, 1 when every path matched -> halt); skip_unless_matches
+# halts only when no changed path matches pattern (grep exits 0 when it
+# found a matching path -> continue, 1 when none matched -> halt). Either
+# way, grep exiting 2 or higher means grep itself failed — most likely
+# PARAM_PATTERN is not a valid extended regular expression — and that
+# case, like every other "cannot decide" case in this script, must fail
+# safe toward continuing, not toward halting. `--` guards the grep call so
+# a pattern starting with `-` is never parsed as an option. Prints an
+# error to stderr when the pattern is invalid. Returns (exits the function
+# with) status 0 when the job should halt, 1 when it should continue
+# (including on an invalid pattern); exits the whole script with status 1
+# if PARAM_MODE is not one of the two known values.
 should_halt() {
     local pattern rc
+    local -a grep_flags
     pattern="$("$CIRCLECI_CLI" env subst "${PARAM_PATTERN}")"
     case "$PARAM_MODE" in
-        skip_if_only_matches)
-            # grep -v exits 0 when it found a path that does NOT match
-            # (so at least one path is unrelated -> continue), 1 when
-            # every path matched (-> halt), and >=2 on a grep error.
-            grep -qvE -- "$pattern" && rc=0 || rc=$?
-            case "$rc" in
-                0) return 1 ;;
-                1) return 0 ;;
-                *)
-                    echo "Invalid pattern (grep exited ${rc}); continuing (fail-safe): ${pattern}" >&2
-                    return 1
-                    ;;
-            esac
-            ;;
-        skip_unless_matches)
-            # grep exits 0 when it found a matching path (-> continue), 1
-            # when none matched (-> halt), and >=2 on a grep error.
-            grep -qE -- "$pattern" && rc=0 || rc=$?
-            case "$rc" in
-                0) return 1 ;;
-                1) return 0 ;;
-                *)
-                    echo "Invalid pattern (grep exited ${rc}); continuing (fail-safe): ${pattern}" >&2
-                    return 1
-                    ;;
-            esac
-            ;;
+        skip_if_only_matches) grep_flags=(-qvE) ;;
+        skip_unless_matches) grep_flags=(-qE) ;;
         *)
             echo "Unknown PARAM_MODE: ${PARAM_MODE}" >&2
             exit 1
+            ;;
+    esac
+
+    grep "${grep_flags[@]}" -- "$pattern" && rc=0 || rc=$?
+    case "$rc" in
+        0) return 1 ;;
+        1) return 0 ;;
+        *)
+            echo "Invalid pattern (grep exited ${rc}); continuing (fail-safe): ${pattern}" >&2
+            return 1
             ;;
     esac
 }
@@ -183,7 +170,7 @@ main() {
 
     resolve_base
 
-    if [ -z "$BASE" ] || [ "$BASE" = "$HEAD" ] || ! git cat-file -e "${BASE}" 2>/dev/null; then
+    if [ -z "$BASE" ] || [ "$BASE" = "$HEAD" ] || ! git cat-file -e "${BASE}^{commit}" 2>/dev/null; then
         echo "Could not determine a base revision; continuing (fail-safe). base source: [${BASE_SOURCE}] base: [${BASE}] head: [${HEAD}]"
         return 0
     fi
