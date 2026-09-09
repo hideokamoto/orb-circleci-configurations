@@ -178,6 +178,30 @@ teardown() {
     ! grep -q "RELEASE_TAG" "$BASH_ENV"
 }
 
+@test "rejects an invalid tag_regex before doing any network I/O" {
+    # A `git fetch` here would attempt to reach the "origin" remote (a local
+    # bare fixture repo, never a real network target — see setup()), so a
+    # fetch marker proves whether the fetch ran without needing to fake a
+    # network failure.
+    FETCH_MARKER="$TEST_DIR/git-fetch-invoked"
+    GIT_REAL="$(command -v git)"
+    cat > "$BIN_DIR/git" <<EOF
+#!/usr/bin/env bash
+if [ "\$1" = "fetch" ]; then
+    touch "$FETCH_MARKER"
+fi
+exec "$GIT_REAL" "\$@"
+EOF
+    chmod +x "$BIN_DIR/git"
+
+    export PARAM_TAG_REGEX='['
+
+    run bash "$SCRIPT"
+
+    [ "$status" -ne 0 ]
+    [ ! -f "$FETCH_MARKER" ]
+}
+
 @test "does not select a tag that only partially matches an unanchored custom tag_regex" {
     git tag v1.0.0
 

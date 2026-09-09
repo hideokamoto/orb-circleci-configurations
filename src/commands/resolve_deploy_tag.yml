@@ -27,13 +27,16 @@ parameters:
       Commit-ish to look up tags on. Empty (the default) resolves to
       `$CIRCLE_SHA1`.
   output_env:
-    type: string
+    type: env_var_name
     default: RELEASE_TAG
     description: >
       Name of the environment variable exported to `$BASH_ENV` with the
       resolved tag value. Must be a valid Bash identifier
-      (`^[A-Za-z_][A-Za-z0-9_]*$`); the command fails with a non-zero exit
-      if it is not.
+      (`^[A-Za-z_][A-Za-z0-9_]*$`) — the `env_var_name` parameter type
+      rejects a bad value at config-compile time, before the job even runs;
+      the script also re-validates it at runtime (returning non-zero rather
+      than exporting a broken line) so direct/test invocations outside the
+      orb parameter pipeline stay safe too.
   halt_if_missing:
     type: boolean
     default: true

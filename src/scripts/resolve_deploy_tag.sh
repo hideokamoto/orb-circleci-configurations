@@ -57,6 +57,19 @@ resolve_deploy_tag() {
         commit="$CIRCLE_SHA1"
     fi
 
+    # Validate tag_regex syntax before doing any network I/O. grep validates
+    # a pattern before it reads input, so running it against empty input is
+    # enough to catch an invalid ERE (exit 2) without needing real tag data;
+    # exit 0 or 1 both just mean the pattern compiled. Doing this ahead of
+    # `git fetch` avoids spending a network round trip on a config typo that
+    # was always going to fail.
+    grep_rc=0
+    printf '' | grep -Eq -- "$tag_regex" || grep_rc=$?
+    if [ "$grep_rc" -gt 1 ]; then
+        echo "Error: tag_regex '${tag_regex}' is invalid (grep exit ${grep_rc})." >&2
+        return 1
+    fi
+
     git fetch --tags --force origin
 
     # `git tag --points-at` failing (bad commit-ish, git error) is a real
