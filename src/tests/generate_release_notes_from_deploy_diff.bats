@@ -253,6 +253,34 @@ line5
   [ "$(echo "$result" | jq -r '.project_id')" = "proj-123" ]
 }
 
+@test "build_payload fails (does not silently succeed with an empty diff) when base_ref is unresolvable" {
+  # Regression test for CodeRabbit finding B: git log/git diff failing on an
+  # unresolvable ref (shallow clone, unfetched tag, typo'd sha) used to be
+  # masked by `jq -R -s` turning the failed command's empty stdin into "[]",
+  # so build_payload "succeeded" with an empty-diff payload instead of
+  # failing so main() could fall back to gh --generate-notes.
+  commit_file "a.txt" "hello"
+  HEAD_SHA="$(git rev-parse HEAD)"
+
+  source "$PAYLOAD_SCRIPT" bats-core
+
+  run build_payload "0000000000000000000000000000000000dead" "$HEAD_SHA" "org-abc" "proj-123"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Invalid or unresolvable git range"* ]]
+  [[ "$output" != *'"diff"'* ]]
+}
+
+@test "build_payload fails when head_ref is unresolvable" {
+  commit_file "a.txt" "hello"
+  HEAD_SHA="$(git rev-parse HEAD)"
+
+  source "$PAYLOAD_SCRIPT" bats-core
+
+  run build_payload "$HEAD_SHA" "0000000000000000000000000000000000dead" "org-abc" "proj-123"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Invalid or unresolvable git range"* ]]
+}
+
 # ---- make_diff_summary_payload.sh: base/head ref resolution ---------------
 
 @test "resolve_base_ref prefers the explicit parameter" {
@@ -317,6 +345,101 @@ line5
   run bash "$PAYLOAD_SCRIPT"
   [ "$status" -eq 0 ]
   grep -q '^export RELEASE_NOTES_SOURCE=gh-generate-notes$' "$BASH_ENV"
+}
+
+@test "main falls back to gh-generate-notes when base_ref is unresolvable (finding B end-to-end)" {
+  # Confirms build_payload's new range validation actually reaches main()'s
+  # existing fallback branch instead of writing an empty-diff payload file.
+  commit_file "a.txt" "hello"
+  HEAD_SHA="$(git rev-parse HEAD)"
+  export PARAM_BASE_REF="0000000000000000000000000000000000dead"
+  export PARAM_HEAD_REF="$HEAD_SHA"
+  PAYLOAD_FILE="${TEST_DIR}/payload.json"
+  export DEPLOY_DIFF_PAYLOAD_FILE="$PAYLOAD_FILE"
+
+  run bash "$PAYLOAD_SCRIPT"
+  [ "$status" -eq 0 ]
+  grep -q '^export RELEASE_NOTES_SOURCE=gh-generate-notes$' "$BASH_ENV"
+  [ ! -f "$PAYLOAD_FILE" ]
+}
+
+@test "main exports the token under CIRCLE_TOKEN when circle_token_env names a different variable (finding A)" {
+  # Regression test for CodeRabbit finding A: `circleci api` (resolve_org_id)
+  # only ever reads its token from $CIRCLE_TOKEN, so a custom
+  # circle_token_env value must be exported under that fixed name, not just
+  # checked for presence — otherwise the API call runs unauthenticated.
+  unset CIRCLE_TOKEN CIRCLE_ORGANIZATION_ID
+  export MY_CUSTOM_TOKEN="custom-tok-value"
+  export PARAM_CIRCLE_TOKEN_ENV="MY_CUSTOM_TOKEN"
+  commit_file "a.txt" "hello"
+  export RELEASE_TAG="$(git rev-parse HEAD)"
+
+  SEEN_TOKEN_FILE="${TEST_DIR}/seen-token"
+  export SEEN_TOKEN_FILE
+
+  # Replace the standalone `circleci` stub for this test only: it records
+  # whatever $CIRCLE_TOKEN it sees at call time, instead of ignoring it like
+  # the default setup() stub does.
+  cat > "${BIN_DIR}/circleci" <<'STUB'
+#!/usr/bin/env bash
+printf '%s' "${CIRCLE_TOKEN:-}" > "$SEEN_TOKEN_FILE"
+if [ "$1" = "api" ] && [ "$2" = "projects/proj-123" ]; then
+  printf '%s' "${STUB_CIRCLECI_ORG_ID:-org-abc}"
+  exit 0
+fi
+exit 1
+STUB
+  chmod +x "${BIN_DIR}/circleci"
+
+  run bash "$PAYLOAD_SCRIPT"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$SEEN_TOKEN_FILE")" = "custom-tok-value" ]
+  ! grep -q 'RELEASE_NOTES_SOURCE' "$BASH_ENV"
+}
+
+@test "fetch main re-resolves the token under CIRCLE_TOKEN from circle_token_env before polling (finding A)" {
+  # fetch_deploy_diff_summary.sh runs as a separate `run:` step/shell from
+  # make_diff_summary_payload.sh, so that step's CIRCLE_TOKEN export does not
+  # carry over — this script must resolve and export it again from
+  # PARAM_CIRCLE_TOKEN_ENV before poll_for_summary's `circleci api` calls.
+  unset CIRCLE_TOKEN
+  export MY_CUSTOM_TOKEN="custom-tok-value"
+  export PARAM_CIRCLE_TOKEN_ENV="MY_CUSTOM_TOKEN"
+  echo '{}' > "${TEST_DIR}/payload.json"
+  export DEPLOY_DIFF_PAYLOAD_FILE="${TEST_DIR}/payload.json"
+  export PARAM_OUTPUT_FILE="${TEST_DIR}/release-notes.md"
+  export PARAM_MAX_POLLS="5"
+  export PARAM_POLL_INTERVAL="0"
+
+  SEEN_TOKEN_FILE="${TEST_DIR}/seen-token"
+  export SEEN_TOKEN_FILE
+
+  cat > "${BIN_DIR}/circleci" <<'STUB'
+#!/usr/bin/env bash
+printf '%s' "${CIRCLE_TOKEN:-}" > "$SEEN_TOKEN_FILE"
+if [ "$1" = "api" ]; then
+  shift
+  if [ "$1" = "deploy/diff-summaries" ] && [ "$2" = "-d" ]; then
+    printf '{"data":{"id":"summary-1"}}'
+    exit 0
+  fi
+  if [[ "$1" == deploy/diff-summaries/* ]]; then
+    if [ "$2" = "--jq" ]; then
+      printf 'ended'
+      exit 0
+    fi
+    printf '{"data":{"attributes":{"phase":"ended","summary":"Notable changes."}}}'
+    exit 0
+  fi
+fi
+exit 1
+STUB
+  chmod +x "${BIN_DIR}/circleci"
+
+  run bash "$FETCH_SCRIPT"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$SEEN_TOKEN_FILE")" = "custom-tok-value" ]
+  grep -q '^export RELEASE_NOTES_SOURCE=deploy-diff-summaries$' "$BASH_ENV"
 }
 
 @test "main builds the payload and exports DEPLOY_DIFF_PAYLOAD_FILE on success" {

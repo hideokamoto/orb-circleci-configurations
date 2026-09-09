@@ -86,13 +86,14 @@ poll_for_summary() {
 # success vars, or falls back to gh-generate-notes.
 # Args:
 #   None. Reads RELEASE_NOTES_SOURCE, DEPLOY_DIFF_PAYLOAD_FILE,
-#   PARAM_OUTPUT_FILE, PARAM_MAX_POLLS, and PARAM_POLL_INTERVAL from the
+#   PARAM_OUTPUT_FILE, PARAM_MAX_POLLS, PARAM_POLL_INTERVAL, and
+#   PARAM_CIRCLE_TOKEN_ENV (plus the environment variable it names) from the
 #   environment.
 # Side effects:
 #   Writes the release notes file on success, and/or appends exports to
 #   $BASH_ENV. Always exits 0 (never fails the job).
 main() {
-  local payload_file output_file max_polls poll_interval summary
+  local payload_file output_file max_polls poll_interval summary token_env token_value
 
   # make_diff_summary_payload.sh already decided this run is not eligible
   # (missing project id/token/org id/head_ref) and exported the fallback;
@@ -106,6 +107,18 @@ main() {
   if [ -z "$payload_file" ] || [ ! -f "$payload_file" ]; then
     fall_back_to_gh_generate_notes "Deploy Diff Summaries payload file is missing; falling back to gh --generate-notes."
     exit 0
+  fi
+
+  # This step runs in its own shell, separate from the one that resolved and
+  # exported CIRCLE_TOKEN in make_diff_summary_payload.sh — that export does
+  # not carry over across `run:` steps. `circleci api` (in poll_for_summary)
+  # only ever reads its token from $CIRCLE_TOKEN, so re-resolve it from
+  # circle_token_env here too; if the run got this far, the earlier step
+  # already confirmed the token is non-empty.
+  token_env="${PARAM_CIRCLE_TOKEN_ENV:-CIRCLE_TOKEN}"
+  token_value="${!token_env:-}"
+  if [ -n "$token_value" ]; then
+    export CIRCLE_TOKEN="$token_value"
   fi
 
   output_file="$("$CIRCLECI_CLI" env subst "${PARAM_OUTPUT_FILE:-/tmp/release-notes.md}")"

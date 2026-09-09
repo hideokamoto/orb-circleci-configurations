@@ -128,11 +128,27 @@ build_files_json() {
 #   $3 - org_id     - CircleCI organization id to embed in the payload.
 #   $4 - project_id - CircleCI project id to embed in the payload.
 # Returns:
-#   Prints the full payload object (JSON: org_id, project_id, diff) to stdout.
+#   0 with the full payload object (JSON: org_id, project_id, diff) on
+#   stdout on success; 1 with no stdout (an error message goes to stderr)
+#   when base_ref/head_ref cannot both be resolved to a commit in the local
+#   clone.
 build_payload() {
   local base_ref="$1" head_ref="$2" org_id="$3" project_id="$4"
   local range="${base_ref}..${head_ref}"
   local commit_messages_json files_json
+
+  # A base_ref/head_ref that can't be resolved locally (shallow clone,
+  # unfetched tag, typo'd sha) makes `git log`/`git diff` below fail, but
+  # `jq -R -s` turns that failed command's empty stdin into "[]" rather than
+  # propagating the failure — silently building an empty-diff payload that
+  # "succeeds" instead of falling back to gh --generate-notes. Validate the
+  # range up front so an unresolvable base_ref or head_ref is treated as a
+  # real failure; `git rev-list` needs to resolve both ends of "$range" to
+  # answer this, so it covers both refs.
+  if ! git rev-list -n 1 "$range" >/dev/null 2>&1; then
+    echo "Invalid or unresolvable git range: ${range}" >&2
+    return 1
+  fi
 
   commit_messages_json="$(git log --format=%s "$range" | jq -R -s 'split("\n") | map(select(length > 0))')"
   files_json="$(build_files_json "$range")"
@@ -225,7 +241,11 @@ fall_back_to_gh_generate_notes() {
 #   and DEPLOY_DIFF_PAYLOAD_FILE from the environment.
 # Side effects:
 #   Writes the payload JSON to the resolved payload file, and/or appends
-#   exports to $BASH_ENV. Always exits 0 (never fails the job).
+#   exports to $BASH_ENV. Exports CIRCLE_TOKEN (this process only, not via
+#   $BASH_ENV) once the token env var is confirmed non-empty, so the
+#   `circleci api` calls in resolve_org_id authenticate even when
+#   circle_token_env names a variable other than CIRCLE_TOKEN. Always exits
+#   0 (never fails the job).
 main() {
   local base_ref head_ref token_env token_value project_id org_id payload_file
 
@@ -245,6 +265,13 @@ main() {
     fall_back_to_gh_generate_notes "\$${token_env} is missing; falling back to gh --generate-notes. Add a CircleCI Personal API Token as \$${token_env} (e.g. in the circleci context)."
     exit 0
   fi
+
+  # `circleci api` (resolve_org_id below, and the fetch_deploy_diff_summary.sh
+  # step that follows) only ever reads its token from $CIRCLE_TOKEN, not from
+  # whatever variable name circle_token_env points at — export it under that
+  # fixed name so a custom circle_token_env actually authenticates the API
+  # calls instead of silently running them unauthenticated.
+  export CIRCLE_TOKEN="$token_value"
 
   org_id="$(resolve_org_id "$project_id")"
   if [ -z "$org_id" ]; then
