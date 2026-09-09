@@ -49,6 +49,26 @@ jobs:
       - run:
           name: Confirm trivy resolves to a working Trivy image
           command: trivy --version
+  test_generate_release_notes_from_deploy_diff:
+    # Exercises the non-blocking fallback path (no CircleCI API token
+    # available), since that is the only path exercisable without live
+    # Deploy Diff Summaries API access from this test job.
+    executor: configurations/base_pinned
+    steps:
+      - checkout
+      - configurations/generate_release_notes_from_deploy_diff:
+          # Point at an env var that is never set, so the command always
+          # falls back regardless of whether CIRCLE_TOKEN happens to be
+          # present in this job's environment.
+          circle_token_env: NONEXISTENT_CIRCLE_TOKEN
+      - run:
+          name: Assert non-blocking fallback to gh --generate-notes
+          command: |
+            if [ "${RELEASE_NOTES_SOURCE:-}" != "gh-generate-notes" ]; then
+              echo "Expected RELEASE_NOTES_SOURCE=gh-generate-notes, got '${RELEASE_NOTES_SOURCE:-<unset>}'" >&2
+              exit 1
+            fi
+            echo "OK: RELEASE_NOTES_SOURCE=gh-generate-notes (non-blocking fallback confirmed)"
 workflows:
   test-deploy:
     jobs:
@@ -57,6 +77,8 @@ workflows:
       - test_base_pinned_executor:
           filters: *filters
       - test_trivy_executor:
+          filters: *filters
+      - test_generate_release_notes_from_deploy_diff:
           filters: *filters
       # The orb must be re-packed for publishing, and saved to the workspace.
       - orb-tools/pack:
@@ -70,5 +92,6 @@ workflows:
             - orb-tools/pack
             - test_base_pinned_executor
             - test_trivy_executor
+            - test_generate_release_notes_from_deploy_diff
           context: orb-publishing
           filters: *release-filters
