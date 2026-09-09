@@ -1,0 +1,64 @@
+description: >
+  Send a CycloneDX SBOM (e.g. produced by `trivy fs --format cyclonedx`) to a
+  Port.io webhook data source ingest URL via HTTP POST, so Port can catalog
+  sbomComponent / sbomVulnerability entities without reading files from
+  GitHub. Migrated from the "Send SBOM to Port webhook" step in
+  workflows/security/sbom-port.yaml, which chose the webhook ingest path
+  because Port's GitHub File ingesting only reads files already committed to
+  a repository, and a CI-generated SBOM is never committed. Fails fast (exit
+  1) when the webhook URL environment variable is unset or empty, so a
+  missing/misconfigured context secret cannot silently skip SBOM ingestion.
+  curl is installed on demand because the aquasec/trivy image this command
+  is meant to run inside is alpine-based and does not ship curl by default.
+  The underlying script is written in POSIX sh (no bash-only syntax), and
+  the run step pins `shell: /bin/sh`, because CircleCI falls back to
+  `/bin/sh -eo pipefail` on any job container without bash — silently
+  breaking bash-only constructs like `${!name}` indirect expansion — and
+  this command's primary target, aquasec/trivy, is one such alpine-based
+  container.
+
+parameters:
+  webhook_url_env:
+    type: env_var_name
+    default: PORT_WEBHOOK_INGEST_URL
+    description: >
+      Name of the environment variable holding the Port webhook ingest URL
+      (expected to be set via a "port" context, matching the source
+      workflow). The command exits 1 with a clear message if this variable
+      is unset or empty at run time.
+  sbom_file:
+    type: string
+    default: sbom.cdx.json
+    description: >
+      Path to the CycloneDX SBOM JSON file to send as the request body
+      (via curl --data-binary @<file>). May reference other environment
+      variables (e.g. "$SBOM_DIR/sbom.cdx.json"); they are expanded with
+      `circleci env subst` (invoked via the CircleCI CLI's fixed install
+      path, not bare `circleci`, since it isn't reliably on PATH).
+  retries:
+    type: integer
+    default: 3
+    description: >
+      Number of times curl retries the POST on transient failure
+      (curl --retry).
+  max_time:
+    type: integer
+    default: 60
+    description: >
+      Maximum total number of seconds curl may spend on the request,
+      including retries (curl --max-time).
+
+steps:
+  - run:
+      name: Send SBOM to Port webhook
+      # Pin the interpreter to POSIX sh explicitly, rather than relying on
+      # CircleCI's bash-if-present/sh-if-not autodetection: the script is
+      # POSIX sh compatible, and pinning makes that the one code path this
+      # command ever runs under, on every job container.
+      shell: /bin/sh -eu
+      environment:
+        PARAM_WEBHOOK_URL_ENV: <<parameters.webhook_url_env>>
+        PARAM_SBOM_FILE: <<parameters.sbom_file>>
+        PARAM_RETRIES: <<parameters.retries>>
+        PARAM_MAX_TIME: <<parameters.max_time>>
+      command: <<include(scripts/send_sbom_to_port.sh)>>
