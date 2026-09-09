@@ -58,13 +58,14 @@ status_to_word() {
 #   working tree via `git`/`jq`; has no other side effects.
 build_files_json() {
   local range="$1"
-  local files_json="[]"
-  local status filename status_word additions deletions additions_num deletions_num file_obj _discard
+  local status filename old_path status_word additions deletions additions_num deletions_num file_obj pathspecs _
+  local file_objs=()
 
   while IFS= read -r -d '' status; do
     filename=""
+    old_path=""
     if [[ "$status" == R* ]] || [[ "$status" == C* ]]; then
-      IFS= read -r -d '' _discard
+      IFS= read -r -d '' old_path
       IFS= read -r -d '' filename
     else
       IFS= read -r -d '' filename
@@ -72,7 +73,20 @@ build_files_json() {
     [ -z "$filename" ] && continue
 
     status_word="$(status_to_word "$status")"
-    IFS=$'\t' read -r additions deletions _discard < <(git diff --numstat "$range" -- "$filename" | head -n1)
+
+    # -M matches the rename detection used by the --name-status call above.
+    # For a rename/copy, a pathspec naming only the new filename can't be
+    # paired back to its source blob (rename detection needs both sides in
+    # scope), so numstat/patch would otherwise report the whole new content
+    # as an addition instead of the actual delta — pass both paths when
+    # this entry is a rename/copy.
+    if [ -n "$old_path" ]; then
+      pathspecs=("$old_path" "$filename")
+    else
+      pathspecs=("$filename")
+    fi
+
+    IFS=$'\t' read -r additions deletions _ < <(git diff --numstat -M "$range" -- "${pathspecs[@]}" | head -n1)
 
     # Binary files report numstat counts as "-"; treat as 0 so jq gets a
     # number rather than failing on a non-numeric --argjson.
@@ -87,16 +101,24 @@ build_files_json() {
       deletions_num="$deletions"
     fi
 
+    # -c (compact, single-line output) so each entry can be collected as one
+    # array element and slurped in a single jq pass below, instead of
+    # re-parsing/re-serializing the whole growing array on every file (an
+    # O(n^2) jq-subprocess pattern for diffs with many files).
     file_obj="$(
-      git diff "$range" -- "$filename" | jq -R -s \
+      git diff -M "$range" -- "${pathspecs[@]}" | jq -R -s -c \
         --arg filename "$filename" --arg status "$status_word" \
         --argjson additions "$additions_num" --argjson deletions "$deletions_num" \
         '{filename: $filename, status: $status, additions: $additions, deletions: $deletions, patch: .}'
     )"
-    files_json="$(echo "$files_json" | jq --argjson f "$file_obj" '. + [$f]')"
+    file_objs+=("$file_obj")
   done < <(git diff --name-status -z -M --diff-filter=ACDMRT "$range")
 
-  printf '%s' "$files_json"
+  if [ "${#file_objs[@]}" -eq 0 ]; then
+    printf '[]'
+  else
+    printf '%s\n' "${file_objs[@]}" | jq -s -c '.'
+  fi
 }
 
 # Builds the full Deploy Diff Summaries API payload for a revision range.

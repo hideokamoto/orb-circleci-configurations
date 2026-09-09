@@ -154,6 +154,37 @@ line two
   [ "$(echo "$result" | jq -r '.[0].status')" = "renamed" ]
 }
 
+@test "build_files_json reports the actual delta (not a full add) for a rename with a content change" {
+  # Regression test: filtering --numstat/diff to only the new filename (a
+  # single pathspec) defeats git's rename pairing even with -M, so a
+  # renamed-and-edited file was previously reported as a full addition of
+  # its entire new content (all lines as additions, 0 deletions, and a
+  # "new file" patch) instead of the actual one-line delta. Passing both
+  # the old and new paths as pathspecs restores correct rename pairing.
+  commit_file "old-name.txt" "line1
+line2
+line3
+line4
+line5
+"
+  BASE_SHA="$(git rev-parse HEAD)"
+  git mv old-name.txt new-name.txt
+  printf 'line1\nline2\nline3-changed\nline4\nline5\n' > new-name.txt
+  git add new-name.txt
+  git commit -q -m "rename and edit old-name.txt to new-name.txt"
+  HEAD_SHA="$(git rev-parse HEAD)"
+
+  source "$PAYLOAD_SCRIPT" bats-core
+  result="$(build_files_json "${BASE_SHA}..${HEAD_SHA}")"
+
+  [ "$(echo "$result" | jq 'length')" -eq 1 ]
+  [ "$(echo "$result" | jq -r '.[0].filename')" = "new-name.txt" ]
+  [ "$(echo "$result" | jq -r '.[0].status')" = "renamed" ]
+  [ "$(echo "$result" | jq -r '.[0].additions')" = "1" ]
+  [ "$(echo "$result" | jq -r '.[0].deletions')" = "1" ]
+  [[ "$(echo "$result" | jq -r '.[0].patch')" == *"rename from old-name.txt"* ]]
+}
+
 @test "build_files_json performs the rename/copy two-pass read (discards the old path)" {
   # git diff --name-status only ever emits C when copy detection (-C) is
   # enabled, which this script does not pass; exercise the two-pass read
