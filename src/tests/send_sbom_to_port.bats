@@ -5,6 +5,11 @@
 # $CIRCLECI_CLI variable (it isn't reliably on PATH on job images such as
 # cimg/base), so these tests redirect that variable to a stub rather than
 # relying on PATH lookup; curl and apk are still stubbed via PATH.
+#
+# The script itself is POSIX sh (see its own header comment for why); most
+# tests below run it via its #!/bin/sh shebang, and two near the end run
+# it explicitly as "sh -eu <file>" to match how CircleCI's `run` step
+# (shell: /bin/sh -eu) actually invokes it.
 
 # setup
 #
@@ -186,4 +191,36 @@ teardown() {
 
     [ "$status" -eq 0 ]
     [ ! -f "${APK_CALLS}" ]
+}
+
+# The two tests below invoke the script as "sh -eu <file>" explicitly,
+# bypassing its own shebang, to reproduce exactly how CircleCI's `run`
+# step executes it under the orb command's pinned "shell: /bin/sh -eu"
+# (and how CircleCI would fall back to running it on any job container
+# without bash). Without these, the script's #!/bin/sh shebang alone
+# would only prove it works when the OS honors that shebang directly —
+# not that it is free of bash-only syntax like "${!name}" indirect
+# expansion, which is exactly what silently broke under a real /bin/sh
+# before this fix.
+
+@test "runs correctly under an explicit sh -eu invocation (no bash-only syntax)" {
+    export TEST_WEBHOOK_URL="https://ingest.example.invalid/webhook/abc"
+
+    PATH="${STUB_DIR}:${PATH}" run sh -eu "${SCRIPT}"
+
+    [ "$status" -eq 0 ]
+    [ -f "${CURL_CALLS}" ]
+    run cat "${CURL_CALLS}"
+    [[ "$output" == *"--data-binary"*"@sbom.cdx.json"* ]]
+    [[ "$output" == *"https://ingest.example.invalid/webhook/abc"* ]]
+}
+
+@test "exits 1 under an explicit sh -eu invocation when the webhook url env var is unset" {
+    unset TEST_WEBHOOK_URL
+
+    PATH="${STUB_DIR}:${PATH}" run sh -eu "${SCRIPT}"
+
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"TEST_WEBHOOK_URL is not set"* ]]
+    [ ! -f "${CURL_CALLS}" ]
 }

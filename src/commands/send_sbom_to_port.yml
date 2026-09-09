@@ -10,6 +10,12 @@ description: >
   missing/misconfigured context secret cannot silently skip SBOM ingestion.
   curl is installed on demand because the aquasec/trivy image this command
   is meant to run inside is alpine-based and does not ship curl by default.
+  The underlying script is written in POSIX sh (no bash-only syntax), and
+  the run step pins `shell: /bin/sh`, because CircleCI falls back to
+  `/bin/sh -eo pipefail` on any job container without bash — silently
+  breaking bash-only constructs like `${!name}` indirect expansion — and
+  this command's primary target, aquasec/trivy, is one such alpine-based
+  container.
 
 parameters:
   webhook_url_env:
@@ -45,6 +51,11 @@ parameters:
 steps:
   - run:
       name: Send SBOM to Port webhook
+      # Pin the interpreter to POSIX sh explicitly, rather than relying on
+      # CircleCI's bash-if-present/sh-if-not autodetection: the script is
+      # POSIX sh compatible, and pinning makes that the one code path this
+      # command ever runs under, on every job container.
+      shell: /bin/sh -eu
       environment:
         PARAM_WEBHOOK_URL_ENV: <<parameters.webhook_url_env>>
         PARAM_SBOM_FILE: <<parameters.sbom_file>>

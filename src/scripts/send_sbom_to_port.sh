@@ -1,5 +1,5 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/sh
+set -eu
 
 # cimg/base (and other job images) don't reliably put `circleci` on PATH —
 # the CLI is provided at a fixed path. Call it via this variable rather
@@ -15,7 +15,12 @@ CIRCLECI_CLI="${CIRCLECI_CLI:-/usr/bin/circleci}"
 #   the "Send SBOM to Port webhook" step in the migrated sbom-port.yaml:
 #   fail fast when the webhook URL isn't configured, install curl on
 #   demand for the alpine-based aquasec/trivy image, then POST with the
-#   same retry/timeout behavior the source step used.
+#   same retry/timeout behavior the source step used. Written in POSIX
+#   sh (no bashisms, no `local`, no `pipefail`) because CircleCI falls
+#   back to `/bin/sh -eo pipefail` on any job container without bash,
+#   and this command's primary target, aquasec/trivy, is one such
+#   alpine-based container; the orb command also pins `shell: /bin/sh`
+#   so this always runs under sh, never an autodetected bash.
 #
 # Arguments:
 #   None. Reads the orb command's parameters via the environment
@@ -31,15 +36,22 @@ CIRCLECI_CLI="${CIRCLECI_CLI:-/usr/bin/circleci}"
 #   missing from PATH, issues one HTTP POST of the SBOM file, and
 #   returns curl's exit status.
 send_sbom_to_port() {
-    local webhook_url_var="${PARAM_WEBHOOK_URL_ENV}"
-    local webhook_url="${!webhook_url_var:-}"
+    webhook_url_var="${PARAM_WEBHOOK_URL_ENV}"
+
+    # POSIX sh has no bash-only "${!name}" indirect expansion. Build and
+    # eval "webhook_url=${<name>-}" instead: pure shell builtins, so it
+    # works identically under bash, dash, and busybox ash (no external
+    # `printenv` dependency). webhook_url_var only ever holds the orb's
+    # env_var_name-typed webhook_url_env parameter — a caller-configured
+    # *variable name*, never free-form input — so this eval only ever
+    # expands a variable reference; it never runs caller-supplied code.
+    eval "webhook_url=\${${webhook_url_var}-}"
 
     if [ -z "${webhook_url}" ]; then
         echo "${webhook_url_var} is not set (expected from a \"port\" context)" >&2
         exit 1
     fi
 
-    local sbom_file
     sbom_file="$("${CIRCLECI_CLI}" env subst "${PARAM_SBOM_FILE}")"
 
     # trivy's aquasec/trivy image is alpine-based and doesn't ship curl.
