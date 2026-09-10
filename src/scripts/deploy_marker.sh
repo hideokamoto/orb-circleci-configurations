@@ -16,6 +16,63 @@ set -euo pipefail
 # environment variable at a stub so no real CLI call is made.
 CIRCLECI_CLI="${CIRCLECI_CLI:-/usr/bin/circleci}"
 
+# export_to_bash_env: append "export NAME=<value>" to $BASH_ENV, serializing
+# the value with `printf %q` first so it survives a later
+# `source "$BASH_ENV"` (run by every subsequent step in the job, in a fresh
+# shell) unchanged -- instead of being re-interpreted as shell syntax if it
+# contains quotes, `$`, backticks, whitespace or embedded newlines. A naive
+# `echo "export NAME=\"$value\""` breaks (or, worse, executes part of the
+# value) the moment $value contains a double quote or a `$(...)`/backtick
+# command substitution.
+#
+# Args:
+#   $1 - variable name to export (assumed to already be a valid shell
+#        identifier; not validated here).
+#   $2 - value to export, any string including one with shell-special
+#        characters.
+# Returns:
+#   Always 0.
+# Side effects:
+#   Appends one line to $BASH_ENV.
+export_to_bash_env() {
+  local name="$1"
+  local value="$2"
+  printf 'export %s=%s\n' "$name" "$(printf '%q' "$value")" >> "$BASH_ENV"
+}
+
+# marker_missing_or_resolved: classify a failed
+# `circleci run release update` call's combined stdout+stderr output as
+# either "the release marker is missing or was already resolved" (safe to
+# tolerate -- see the PARAM_TOLERATE_MISSING handling in
+# deploy_marker_update) or some other failure that must propagate instead
+# of being swallowed (authentication, connectivity, a malformed request,
+# etc.). The build-agent CLI's exact error text for a missing/resolved
+# release is not documented, so this matches conservatively on a set of
+# case-insensitive substrings that describe absence or a prior resolution;
+# anything that does not match one of them -- including a failure with no
+# output at all -- is treated as NOT tolerable, matching the "don't swallow
+# unrelated failures" requirement this function exists to enforce.
+#
+# Args:
+#   $1 - the CLI call's combined stdout+stderr output (may be empty).
+# Returns:
+#   0 if the output indicates a missing or already-resolved marker
+#   (tolerate). 1 otherwise (propagate), including for empty output.
+# Side effects:
+#   None.
+marker_missing_or_resolved() {
+  local output_lower
+  output_lower="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+  case "$output_lower" in
+    *"not found"*|*"no release"*|*"no such release"*|*"does not exist"*|*"already resolved"*|*"already exists with status"*|*"already in a terminal state"*|*"already terminal"*)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
 # resolve_component_name: resolve the CircleCI Deploys component name from,
 # in order: an explicit value (the command parameter, already env-subst'd by
 # the caller), the DEPLOY_COMPONENT_NAME environment variable (settable at
@@ -68,7 +125,10 @@ resolve_component_name() {
 #   "$CIRCLECI_CLI run release plan ..." call.
 # Side effects:
 #   - Appends "export DEPLOY_COMPONENT_NAME=..." and
-#     "export DEPLOY_NAME=..." lines to $BASH_ENV.
+#     "export DEPLOY_NAME=..." lines to $BASH_ENV via export_to_bash_env,
+#     which `printf %q`-serializes each value first so a component name
+#     containing shell-special characters survives a later `source
+#     "$BASH_ENV"` unchanged.
 #   - Invokes $CIRCLECI_CLI twice for `env subst` (parameter
 #     expansion) and once for `run release plan`.
 deploy_marker_plan() {
@@ -78,8 +138,8 @@ deploy_marker_plan() {
   component_name="$(resolve_component_name "$param_component_name")"
   local deploy_name="${component_name}-${CIRCLE_WORKFLOW_ID}"
 
-  echo "export DEPLOY_COMPONENT_NAME=\"${component_name}\"" >> "$BASH_ENV"
-  echo "export DEPLOY_NAME=\"${deploy_name}\"" >> "$BASH_ENV"
+  export_to_bash_env DEPLOY_COMPONENT_NAME "$component_name"
+  export_to_bash_env DEPLOY_NAME "$deploy_name"
 
   local param_target_version
   param_target_version="$("$CIRCLECI_CLI" env subst "${PARAM_TARGET_VERSION:-}")"
@@ -111,9 +171,15 @@ deploy_marker_plan() {
 #                              PARAM_STATUS=FAILED, or ""
 #                              (falls back to $FAILURE_REASON, then to the
 #                              literal "Deployment failed")
-#     PARAM_TOLERATE_MISSING - "true" to swallow a failing CLI call
-#                               instead of propagating it; any other value
-#                               (including unset) behaves as "false"
+#     PARAM_TOLERATE_MISSING - "true" to swallow a failing CLI call whose
+#                               output indicates the release marker is
+#                               missing or was already resolved (see
+#                               marker_missing_or_resolved); any other
+#                               value (including unset) behaves as "false".
+#                               A CLI failure whose output does NOT match
+#                               that pattern (authentication, connectivity,
+#                               a malformed request, etc.) always
+#                               propagates, regardless of this parameter.
 #   Also reads DEPLOY_NAME (if already exported by a preceding
 #   deploy_marker_plan call in the same job), DEPLOY_COMPONENT_NAME,
 #   CIRCLE_PROJECT_REPONAME, CIRCLE_WORKFLOW_ID and FAILURE_REASON from the
@@ -121,13 +187,20 @@ deploy_marker_plan() {
 #   build-agent CLI path.
 # Returns:
 #   0 if the underlying "$CIRCLECI_CLI run release update ..." call
-#   succeeds, or if it fails and PARAM_TOLERATE_MISSING is "true" (the
-#   failure is logged and swallowed). 1 if it fails and
-#   PARAM_TOLERATE_MISSING is not "true".
+#   succeeds, or if it fails, PARAM_TOLERATE_MISSING is "true", and the
+#   call's output indicates the marker is missing or already resolved (see
+#   marker_missing_or_resolved) -- that failure is logged and swallowed.
+#   1 if the call fails and either PARAM_TOLERATE_MISSING is not "true", or
+#   the output does not match that missing/already-resolved pattern (an
+#   unrelated failure -- authentication, connectivity, a malformed
+#   request, etc. -- is never swallowed, even with tolerate_missing set).
 # Side effects:
 #   Invokes $CIRCLECI_CLI for `env subst` (when PARAM_STATUS=FAILED)
-#   and once for `run release update`. Prints a message to stdout when a
-#   failure is tolerated.
+#   and once for `run release update`, capturing its combined
+#   stdout+stderr so the output can be classified. That output is always
+#   echoed afterwards (to stdout on success, to stderr on failure) so it
+#   still reaches the job log. Prints an additional message to stdout when
+#   a failure is tolerated.
 deploy_marker_update() {
   local param_component_name
   param_component_name="$("$CIRCLECI_CLI" env subst "${PARAM_COMPONENT_NAME:-}")"
@@ -156,16 +229,35 @@ deploy_marker_update() {
     args+=("--failure-reason=${reason}")
   fi
 
-  if "$CIRCLECI_CLI" "${args[@]}"; then
+  # Capture the call's combined stdout+stderr instead of letting it stream
+  # directly: PARAM_TOLERATE_MISSING (below) needs to inspect the output to
+  # decide whether this failure is safe to swallow. The output is still
+  # surfaced afterwards either way, so nothing is lost from the job log.
+  local cli_output cli_status
+  cli_status=0
+  cli_output="$("$CIRCLECI_CLI" "${args[@]}" 2>&1)" || cli_status=$?
+
+  if [ "$cli_status" -eq 0 ]; then
+    if [ -n "$cli_output" ]; then
+      printf '%s\n' "$cli_output"
+    fi
     return 0
+  fi
+
+  if [ -n "$cli_output" ]; then
+    printf '%s\n' "$cli_output" >&2
   fi
 
   # cancel-deploy also runs on requires:[failed], so the deploy job's own
   # on_fail step may have already resolved the marker to FAILED (or the
   # marker may never have been planned at all, e.g. the deploy job failed
   # before reaching deploy_marker_plan). tolerate_missing lets a caller
-  # accept that race/absence instead of failing its own step.
-  if [ "${PARAM_TOLERATE_MISSING:-false}" = "true" ]; then
+  # accept that specific race/absence instead of failing its own step --
+  # but only when the CLI's own output confirms that's what happened.
+  # Any other failure (auth, connectivity, a malformed request, ...) must
+  # still propagate: swallowing those unconditionally would hide real
+  # problems behind a misleading "nothing to reconcile" success.
+  if [ "${PARAM_TOLERATE_MISSING:-false}" = "true" ] && marker_missing_or_resolved "$cli_output"; then
     echo "marker already resolved or not found -- nothing to reconcile"
     return 0
   fi

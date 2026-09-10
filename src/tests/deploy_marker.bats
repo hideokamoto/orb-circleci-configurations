@@ -6,10 +6,12 @@
 
 # setup: bats-core per-test hook. Builds an isolated fixture for each test
 # case -- a temp $BASH_ENV file, a stubbed CIRCLECI_CLI binary (with a
-# calls.log the tests assert against), and a baseline CircleCI job
-# environment -- then sources deploy_marker.sh so its functions
-# (resolve_component_name, deploy_marker_plan, deploy_marker_update, main)
-# are callable directly from each @test block.
+# calls.log the tests assert against, and an optional STUB_OUTPUT /
+# STUB_EXIT_CODE pair a test can set beforehand to simulate a specific CLI
+# failure), and a baseline CircleCI job environment -- then sources
+# deploy_marker.sh so its functions (resolve_component_name,
+# export_to_bash_env, marker_missing_or_resolved, deploy_marker_plan,
+# deploy_marker_update, main) are callable directly from each @test block.
 #
 # Args:
 #   None. Invoked automatically by bats-core before every @test in this
@@ -23,8 +25,9 @@
 #     cleaned up here (see teardown).
 #   - Exports BASH_ENV, CLI_CALL_LOG, CIRCLECI_CLI, CIRCLE_PROJECT_REPONAME,
 #     CIRCLE_WORKFLOW_ID and CIRCLE_SHA1 into the test process's environment.
-#   - Unsets DEPLOY_COMPONENT_NAME, DEPLOY_NAME, FAILURE_REASON and
-#     STUB_EXIT_CODE so ambient sandbox state can't leak into a test.
+#   - Unsets DEPLOY_COMPONENT_NAME, DEPLOY_NAME, FAILURE_REASON,
+#     STUB_EXIT_CODE and STUB_OUTPUT so ambient sandbox state can't leak
+#     into a test.
 #   - Sources src/scripts/deploy_marker.sh into the current shell (its
 #     `main` guard does not fire because $0 here is the bats-core runner,
 #     not the script itself).
@@ -52,6 +55,13 @@ if [ "$1" = "env" ] && [ "$2" = "subst" ]; then
   eval "printf '%s' \"$3\""
   exit 0
 fi
+# STUB_OUTPUT, when set, simulates the real CLI's error text on stderr for
+# a `run release update` failure -- lets tests exercise
+# marker_missing_or_resolved's classification without depending on the
+# real build-agent CLI's undocumented error strings.
+if [ -n "${STUB_OUTPUT:-}" ]; then
+  printf '%s\n' "$STUB_OUTPUT" >&2
+fi
 echo "$@" >> "$CLI_CALL_LOG"
 exit "${STUB_EXIT_CODE:-0}"
 EOS
@@ -59,7 +69,7 @@ EOS
   export CIRCLECI_CLI
 
   # Isolate from any ambient CircleCI job env this sandbox happens to run in.
-  unset DEPLOY_COMPONENT_NAME DEPLOY_NAME FAILURE_REASON STUB_EXIT_CODE || true
+  unset DEPLOY_COMPONENT_NAME DEPLOY_NAME FAILURE_REASON STUB_EXIT_CODE STUB_OUTPUT || true
   export CIRCLE_PROJECT_REPONAME="orb-test-repo"
   export CIRCLE_WORKFLOW_ID="wf-123"
   export CIRCLE_SHA1="abcdef0123456789"
@@ -115,8 +125,12 @@ teardown() {
   run deploy_marker_plan
   [ "$status" -eq 0 ]
 
-  grep -q 'export DEPLOY_COMPONENT_NAME="orb-test-repo"' "$BASH_ENV"
-  grep -q 'export DEPLOY_NAME="orb-test-repo-wf-123"' "$BASH_ENV"
+  # deploy_marker_plan writes these via export_to_bash_env (printf %q
+  # serialization -- see the dedicated export_to_bash_env tests below), so
+  # assert on the round-tripped values rather than a specific literal
+  # quoting style.
+  result="$(bash -c 'source "$1" && printf "%s\n%s" "$DEPLOY_COMPONENT_NAME" "$DEPLOY_NAME"' _ "$BASH_ENV")"
+  [ "$result" = "$(printf '%s\n%s' 'orb-test-repo' 'orb-test-repo-wf-123')" ]
 }
 
 @test "deploy_marker_plan calls release plan with the resolved name, environment and target version" {
@@ -154,6 +168,80 @@ teardown() {
   [ "$status" -eq 0 ]
 
   grep -q -- '--component-name=subst-component' "$CLI_CALL_LOG"
+}
+
+# --- export_to_bash_env (printf %q serialization, RC/CodeRabbit fix) -------
+
+@test "export_to_bash_env round-trips a value containing quotes, dollar signs and backticks" {
+  value='va"lue with $dollar `backtick` and '"'"'single quote'"'"''
+  export_to_bash_env "TEST_VAR" "$value"
+
+  # Source BASH_ENV in a *fresh* bash process, exactly as a later CircleCI
+  # step would, so this proves the printf %q-serialized line really is
+  # safe to source rather than just well-formed in isolation.
+  result="$(bash -c 'source "$1" && printf %s "$TEST_VAR"' _ "$BASH_ENV")"
+  [ "$result" = "$value" ]
+}
+
+@test "export_to_bash_env round-trips a value containing a command substitution" {
+  value='before $(touch should-not-run) after'
+  export_to_bash_env "TEST_VAR" "$value"
+
+  marker_dir="$(mktemp -d)"
+  ( cd "$marker_dir" && bash -c 'source "$1"' _ "$BASH_ENV" )
+  # If export_to_bash_env had embedded $value inside a naive double-quoted
+  # export line, sourcing it would execute the command substitution and
+  # create this file; printf %q must prevent that.
+  [ ! -e "$marker_dir/should-not-run" ]
+  rm -rf "$marker_dir"
+
+  result="$(bash -c 'source "$1" && printf %s "$TEST_VAR"' _ "$BASH_ENV")"
+  [ "$result" = "$value" ]
+}
+
+@test "export_to_bash_env round-trips a value containing embedded newlines" {
+  value="$(printf 'first line\nsecond line')"
+  export_to_bash_env "TEST_VAR" "$value"
+
+  result="$(bash -c 'source "$1" && printf %s "$TEST_VAR"' _ "$BASH_ENV")"
+  [ "$result" = "$value" ]
+}
+
+# --- marker_missing_or_resolved (CodeRabbit fix: don't over-tolerate) ------
+
+@test "marker_missing_or_resolved accepts a 'not found' message" {
+  run marker_missing_or_resolved "Error: release 'svc-wf-123' not found"
+  [ "$status" -eq 0 ]
+}
+
+@test "marker_missing_or_resolved accepts an 'already resolved' message" {
+  run marker_missing_or_resolved "release svc-wf-123 is already resolved"
+  [ "$status" -eq 0 ]
+}
+
+@test "marker_missing_or_resolved is case-insensitive" {
+  run marker_missing_or_resolved "RELEASE NOT FOUND"
+  [ "$status" -eq 0 ]
+}
+
+@test "marker_missing_or_resolved rejects an authentication failure" {
+  run marker_missing_or_resolved "Error: authentication failed: invalid API token"
+  [ "$status" -ne 0 ]
+}
+
+@test "marker_missing_or_resolved rejects a connectivity failure" {
+  run marker_missing_or_resolved "Error: could not connect to api.circleci.com: connection refused"
+  [ "$status" -ne 0 ]
+}
+
+@test "marker_missing_or_resolved rejects a bad-request failure" {
+  run marker_missing_or_resolved "Error: 400 Bad Request: invalid status transition"
+  [ "$status" -ne 0 ]
+}
+
+@test "marker_missing_or_resolved rejects empty output" {
+  run marker_missing_or_resolved ""
+  [ "$status" -ne 0 ]
 }
 
 # --- deploy_marker_update ----------------------------------------------------
@@ -276,12 +364,26 @@ teardown() {
   [ "$status" -ne 0 ]
 }
 
-@test "deploy_marker_update tolerates a failing CLI call when tolerate_missing is true" {
+@test "deploy_marker_update tolerates a 'not found' CLI failure when tolerate_missing is true" {
   export PARAM_ACTION="update"
   export PARAM_COMPONENT_NAME="svc"
   export PARAM_STATUS="CANCELED"
   export PARAM_TOLERATE_MISSING="true"
   export STUB_EXIT_CODE="1"
+  export STUB_OUTPUT="Error: release 'svc-wf-123' not found"
+
+  run deploy_marker_update
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "already resolved or not found"
+}
+
+@test "deploy_marker_update tolerates an 'already resolved' CLI failure when tolerate_missing is true" {
+  export PARAM_ACTION="update"
+  export PARAM_COMPONENT_NAME="svc"
+  export PARAM_STATUS="CANCELED"
+  export PARAM_TOLERATE_MISSING="true"
+  export STUB_EXIT_CODE="1"
+  export STUB_OUTPUT="release svc-wf-123 is already resolved"
 
   run deploy_marker_update
   [ "$status" -eq 0 ]
@@ -293,9 +395,61 @@ teardown() {
   export PARAM_COMPONENT_NAME="svc"
   export PARAM_STATUS="CANCELED"
   export STUB_EXIT_CODE="1"
+  export STUB_OUTPUT="Error: release 'svc-wf-123' not found"
 
   run deploy_marker_update
   [ "$status" -ne 0 ]
+}
+
+@test "deploy_marker_update propagates an authentication failure even when tolerate_missing is true" {
+  export PARAM_ACTION="update"
+  export PARAM_COMPONENT_NAME="svc"
+  export PARAM_STATUS="CANCELED"
+  export PARAM_TOLERATE_MISSING="true"
+  export STUB_EXIT_CODE="1"
+  export STUB_OUTPUT="Error: authentication failed: invalid API token"
+
+  run deploy_marker_update
+  [ "$status" -ne 0 ]
+  ! echo "$output" | grep -q "already resolved or not found"
+}
+
+@test "deploy_marker_update propagates a connectivity failure even when tolerate_missing is true" {
+  export PARAM_ACTION="update"
+  export PARAM_COMPONENT_NAME="svc"
+  export PARAM_STATUS="CANCELED"
+  export PARAM_TOLERATE_MISSING="true"
+  export STUB_EXIT_CODE="1"
+  export STUB_OUTPUT="Error: could not connect to api.circleci.com: connection refused"
+
+  run deploy_marker_update
+  [ "$status" -ne 0 ]
+  ! echo "$output" | grep -q "already resolved or not found"
+}
+
+@test "deploy_marker_update propagates a bad-request failure even when tolerate_missing is true" {
+  export PARAM_ACTION="update"
+  export PARAM_COMPONENT_NAME="svc"
+  export PARAM_STATUS="CANCELED"
+  export PARAM_TOLERATE_MISSING="true"
+  export STUB_EXIT_CODE="1"
+  export STUB_OUTPUT="Error: 400 Bad Request: invalid status transition"
+
+  run deploy_marker_update
+  [ "$status" -ne 0 ]
+  ! echo "$output" | grep -q "already resolved or not found"
+}
+
+@test "deploy_marker_update propagates a failure with no CLI output even when tolerate_missing is true" {
+  export PARAM_ACTION="update"
+  export PARAM_COMPONENT_NAME="svc"
+  export PARAM_STATUS="CANCELED"
+  export PARAM_TOLERATE_MISSING="true"
+  export STUB_EXIT_CODE="1"
+
+  run deploy_marker_update
+  [ "$status" -ne 0 ]
+  ! echo "$output" | grep -q "already resolved or not found"
 }
 
 # --- main() dispatch ---------------------------------------------------------
