@@ -56,7 +56,8 @@ circleci_cli_already_present() {
 #   "sudo install" when a (re)install is needed. Because of "set -euo
 #   pipefail", the function (and the script) exits non-zero if the
 #   download, the sha256 verification, the extraction, or the install
-#   step fails.
+#   step fails; an EXIT trap always removes the scratch tmp_dir (archive
+#   and extracted files) on that path too, not just on success.
 #######################################
 install_circleci_cli() {
   local version sha256 install_path skip_if_present
@@ -72,11 +73,25 @@ install_circleci_cli() {
 
   local tmp_dir archive url
   tmp_dir="$(mktemp -d)"
+  # Ensure tmp_dir (archive + extracted files) is removed on any exit path,
+  # not just success: "set -euo pipefail" means a download/extract failure
+  # below exits the script before reaching the explicit cleanup at the end,
+  # which used to leak the archive and any partially-extracted files. The
+  # path is baked into the trap string now (double quotes, expanded at
+  # registration time) rather than deferred to fire time: tmp_dir is
+  # "local" to this function, so a deferred "${tmp_dir}" would read as
+  # unbound (set -u) once the trap fires after the function has returned.
+  # shellcheck disable=SC2064
+  trap "rm -rf '${tmp_dir}'" EXIT
   archive="${tmp_dir}/circleci-cli.tar.gz"
   url="https://github.com/CircleCI-Public/circleci-cli/releases/download/v${version}/circleci-cli_${version}_linux_amd64.tar.gz"
 
   echo "Downloading circleci-cli ${version} from ${url}"
-  curl -fLSs -o "${archive}" "${url}"
+  # --connect-timeout caps the TCP/TLS handshake; --max-time caps the whole
+  # transfer, so a stalled or slow GitHub Releases download can't hang the
+  # job indefinitely. Failure handling (curl's non-zero exit under "set -e")
+  # and the archive's output path are unchanged.
+  curl -fLSs --connect-timeout 10 --max-time 120 -o "${archive}" "${url}"
 
   echo "Verifying sha256 checksum"
   echo "${sha256}  ${archive}" | sha256sum -c -
@@ -85,8 +100,6 @@ install_circleci_cli() {
 
   echo "Installing circleci-cli ${version} to ${install_path}/circleci"
   sudo install -m 0755 "${tmp_dir}/circleci" "${install_path}/circleci"
-
-  rm -rf "${tmp_dir}"
 }
 
 #######################################

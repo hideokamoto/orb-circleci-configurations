@@ -192,3 +192,14 @@ run_install() {
   run "${INSTALL_DIR}/circleci"
   [ "$output" = "fake circleci cli" ]
 }
+
+@test "skip_if_present=false forces a reinstall even when a working CircleCI CLI is already on PATH" {
+  stub_circleci 0
+  run run_install "${GOOD_SHA256}" "false"
+
+  [ "$status" -eq 0 ]
+  [ -s "$CURL_LOG" ]
+  [ -x "${INSTALL_DIR}/circleci" ]
+  run "${INSTALL_DIR}/circleci"
+  [ "$output" = "fake circleci cli" ]
+}
