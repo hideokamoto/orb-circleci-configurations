@@ -24,6 +24,7 @@ CIRCLECI_CLI="${CIRCLECI_CLI:-/usr/bin/circleci}"
 # resolved output env var name is not a safe shell identifier.
 main() {
     local tag_regex release_tag_env_name release_tag output_env_name release_commit prev_tag prev_tag_safe
+    local tag_regex_probe_status
 
     tag_regex="$("${CIRCLECI_CLI}" env subst "${PARAM_TAG_REGEX}")"
     release_tag_env_name="${PARAM_RELEASE_TAG_ENV}"
@@ -49,6 +50,26 @@ main() {
     fi
 
     release_commit="$(git rev-list -n1 "${release_tag}")"
+
+    # Validate tag_regex as an extended regular expression *before* it is
+    # used to walk commit history below. Without this check, a syntactically
+    # invalid regex makes every `grep -E` call in the walk fail (exit status
+    # 2), which the walk's trailing `|| true` (needed to absorb the `while
+    # read` loop's normal EOF non-zero status) would silently swallow too —
+    # producing an empty prev_tag that is indistinguishable from the
+    # legitimate "no matching tag found, this is the first release" case.
+    # Probing against empty input isolates a syntax error (grep exit status
+    # 2) from "valid regex, simply no match" (exit status 1) without
+    # depending on any real tag data.
+    if grep -E -- "${tag_regex}" >/dev/null 2>&1 </dev/null; then
+        :
+    else
+        tag_regex_probe_status=$?
+        if [ "${tag_regex_probe_status}" -ge 2 ]; then
+            echo "resolve_previous_deploy_tag: tag_regex \"${tag_regex}\" is not a valid extended regular expression (grep -E rejected it); refusing to walk commit history with it." >&2
+            exit 1
+        fi
+    fi
 
     # Walk from the release commit toward its ancestors (git log's default
     # enumeration order guarantees a commit is listed before its ancestors).

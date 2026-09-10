@@ -284,6 +284,28 @@ read_bash_env_var() {
     [ ! -s "${BASH_ENV}" ]
 }
 
+@test "syntactically invalid tag_regex is rejected before the commit history walk, not treated as a first release" {
+    # Regression test: an invalid ERE (unbalanced bracket expression) makes
+    # every `grep -E "${tag_regex}"` call inside the walk fail with exit
+    # status 2, which the walk's trailing `|| true` previously swallowed
+    # right along with the `while read` loop's expected EOF status,
+    # producing an empty prev_tag indistinguishable from a legitimate first
+    # release. This must fail fast instead, before any history walk runs.
+    make_commit "root" # untagged root ancestor; see file header note
+    make_commit "c1"
+    git tag "2026.09.10-abc0000" # would be a legitimate previous release
+    make_commit "c2"
+    git tag "2026.09.10-def0000"
+    export PARAM_TAG_REGEX='[' # unbalanced bracket expression: not a valid ERE
+    export RELEASE_TAG="2026.09.10-def0000"
+
+    source "${SCRIPT}"
+    run main
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"not a valid extended regular expression"* ]]
+    [ ! -s "${BASH_ENV}" ]
+}
+
 @test "prev_tag containing shell metacharacters round-trips safely through export and source" {
     # Regression test for the $BASH_ENV injection risk: an unescaped tag
     # value embedding a command substitution would execute when a later
