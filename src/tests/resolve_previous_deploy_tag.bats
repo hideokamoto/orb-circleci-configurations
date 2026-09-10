@@ -2,7 +2,12 @@
 # Covers resolve_previous_deploy_tag.sh: the ancestor-walk approach must
 # find the true previous release tag even when a naive `--sort=-refname` or
 # `--sort=-creatordate` would pick the wrong one, must find none on a first
-# release, and must walk correctly through a merge commit.
+# release, and must walk correctly through a merge commit. Also covers the
+# $BASH_ENV write path's safety: the release tag must be excluded from the
+# candidate list as a literal string (not an unescaped regex), the
+# output_env parameter must be validated as a safe shell identifier before
+# anything is written, and the exported previous-tag value must round-trip
+# safely through export/source even when it contains shell metacharacters.
 #
 # Note on fixture shape: `git log --pretty=format:'%H'` (as used by the
 # unmodified migration source) does not terminate its final output line
@@ -97,6 +102,22 @@ make_commit() {
     git commit -q -m "${message}"
 }
 
+# Sources $BASH_ENV in a fresh, isolated bash subshell and echoes the
+# resulting value of the named variable, so tests can assert against the
+# *value* a real downstream step would see after sourcing $BASH_ENV rather
+# than the exact quoting/escaping style the script chose to write (which is
+# an implementation detail once the line is shell-safe; printf %q only adds
+# quoting when a value actually needs it). Also doubles as the vehicle for
+# the export/source round-trip safety regression test: if the script ever
+# stopped shell-escaping prev_tag, a malicious tag value could execute
+# arbitrary commands during this very `source`. Args: $1 = variable name to
+# read after sourcing. Output: the variable's value on stdout, empty string
+# if it was left unset.
+read_bash_env_var() {
+    local var_name="$1"
+    bash -c "source \"${BASH_ENV}\" && printf '%s' \"\${${var_name}:-}\""
+}
+
 @test "same-day multiple deploys: picks the true ancestor over the lexicographically largest sha7" {
     make_commit "c1"
     git tag "2026.03.01-fffffff" # would win a naive --sort=-refname (largest sha7)
@@ -110,7 +131,7 @@ make_commit() {
     run main
     [ "$status" -eq 0 ]
 
-    grep -qx 'export PREV_RELEASE_TAG="2026.03.01-1111111"' "${BASH_ENV}"
+    [ "$(read_bash_env_var PREV_RELEASE_TAG)" = "2026.03.01-1111111" ]
 }
 
 @test "same-second tags: ancestry, not creatordate, decides the previous tag" {
@@ -133,7 +154,7 @@ make_commit() {
     run main
     [ "$status" -eq 0 ]
 
-    grep -qx 'export PREV_RELEASE_TAG="2026.04.01-2000000"' "${BASH_ENV}"
+    [ "$(read_bash_env_var PREV_RELEASE_TAG)" = "2026.04.01-2000000" ]
 }
 
 @test "previous release tag is on the walk's oldest (last-enumerated) ancestor" {
@@ -153,7 +174,7 @@ make_commit() {
     run main
     [ "$status" -eq 0 ]
 
-    grep -qx 'export PREV_RELEASE_TAG="2026.08.01-c1c1c1c"' "${BASH_ENV}"
+    [ "$(read_bash_env_var PREV_RELEASE_TAG)" = "2026.08.01-c1c1c1c" ]
 }
 
 @test "first release: no matching ancestor tag, nothing is exported" {
@@ -185,7 +206,7 @@ make_commit() {
     run main
     [ "$status" -eq 0 ]
 
-    grep -qx 'export PREV_RELEASE_TAG="2026.06.01-0000abc"' "${BASH_ENV}"
+    [ "$(read_bash_env_var PREV_RELEASE_TAG)" = "2026.06.01-0000abc" ]
 }
 
 @test "release tag env var missing: fails fast with a clear message instead of resolving silently" {
@@ -213,5 +234,80 @@ make_commit() {
     run main
     [ "$status" -eq 0 ]
 
-    grep -qx 'export MY_PREV_TAG="2026.07.01-aaaaaaa"' "${BASH_ENV}"
+    [ "$(read_bash_env_var MY_PREV_TAG)" = "2026.07.01-aaaaaaa" ]
+}
+
+@test "release_tag treated as a literal exclusion, not a regex: release.1 does not also exclude releaseX1" {
+    # Guards against the release tag being passed to `grep -v` unescaped: as
+    # an ERE, "release.1" would let "." match any character, so it would
+    # wrongly also exclude an ancestor tag like "releaseX1" from the
+    # candidate list.
+    make_commit "root" # untagged root ancestor; see file header note
+    make_commit "c1"
+    git tag "releaseX1" # must NOT be excluded by a "release.1" release tag
+    make_commit "c2"
+    git tag "release.1" # current release; "." must be matched literally
+
+    export PARAM_TAG_REGEX='.*'
+    export RELEASE_TAG="release.1"
+
+    source "${SCRIPT}"
+    run main
+    [ "$status" -eq 0 ]
+
+    [ "$(read_bash_env_var PREV_RELEASE_TAG)" = "releaseX1" ]
+}
+
+@test "output_env resolving to an unsafe identifier is rejected before \$BASH_ENV is touched" {
+    make_commit "c1"
+    git tag "2026.09.01-abc0000"
+    export RELEASE_TAG="2026.09.01-abc0000"
+    export PARAM_OUTPUT_ENV='PREV_TAG; rm -rf /tmp/should-not-run'
+
+    source "${SCRIPT}"
+    run main
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"not a safe environment variable name"* ]]
+    [ ! -s "${BASH_ENV}" ]
+}
+
+@test "output_env resolving to a lowercase or digit-led name is rejected" {
+    make_commit "c1"
+    git tag "2026.09.02-abc0000"
+    export RELEASE_TAG="2026.09.02-abc0000"
+    export PARAM_OUTPUT_ENV='prev_release_tag'
+
+    source "${SCRIPT}"
+    run main
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"not a safe environment variable name"* ]]
+    [ ! -s "${BASH_ENV}" ]
+}
+
+@test "prev_tag containing shell metacharacters round-trips safely through export and source" {
+    # Regression test for the $BASH_ENV injection risk: an unescaped tag
+    # value embedding a command substitution would execute when a later
+    # step sources $BASH_ENV. printf %q must render it as an inert string.
+    #
+    # The tag literally contains the six characters `${IFS}` (no actual
+    # space) so that `git tag` (which rejects tag names with a real space
+    # byte) accepts it, while the payload is still a live command
+    # substitution once *sourced* by bash, where `${IFS}` expands to
+    # whitespace and would run `touch INJECTED` if the export line were not
+    # shell-escaped.
+    make_commit "root" # untagged root ancestor; see file header note
+    make_commit "c1"
+    git tag 'evil-$(touch${IFS}INJECTED)-tag'
+    make_commit "c2"
+    git tag "release-current"
+
+    export PARAM_TAG_REGEX='.*'
+    export RELEASE_TAG="release-current"
+
+    source "${SCRIPT}"
+    run main
+    [ "$status" -eq 0 ]
+
+    [ "$(read_bash_env_var PREV_RELEASE_TAG)" = 'evil-$(touch${IFS}INJECTED)-tag' ]
+    [ ! -e "INJECTED" ]
 }

@@ -17,16 +17,28 @@ CIRCLECI_CLI="${CIRCLECI_CLI:-/usr/bin/circleci}"
 # step): PARAM_TAG_REGEX (string, substituted through `circleci env subst`),
 # PARAM_RELEASE_TAG_ENV (env_var_name, read by indirection), PARAM_OUTPUT_ENV
 # (string, substituted through `circleci env subst`).
-# Side effects: appends `export <output env>="<prev tag>"` to $BASH_ENV when
-# a previous release tag is found; writes progress/result messages to
-# stdout; exits 1 with a message on stderr if the release tag env var named
-# by PARAM_RELEASE_TAG_ENV is unset or empty.
+# Side effects: appends `export <output env>=<prev tag, printf %q-escaped>`
+# to $BASH_ENV when a previous release tag is found; writes progress/result
+# messages to stdout; exits 1 with a message on stderr if the release tag
+# env var named by PARAM_RELEASE_TAG_ENV is unset or empty, or if the
+# resolved output env var name is not a safe shell identifier.
 main() {
-    local tag_regex release_tag_env_name release_tag output_env_name release_commit prev_tag
+    local tag_regex release_tag_env_name release_tag output_env_name release_commit prev_tag prev_tag_safe
 
     tag_regex="$("${CIRCLECI_CLI}" env subst "${PARAM_TAG_REGEX}")"
     release_tag_env_name="${PARAM_RELEASE_TAG_ENV}"
     output_env_name="$("${CIRCLECI_CLI}" env subst "${PARAM_OUTPUT_ENV}")"
+
+    # output_env_name becomes a literal shell identifier in an
+    # `export NAME=...` line appended to $BASH_ENV. Since it is
+    # parameter-derived, validate it against a conventional environment
+    # variable identifier shape *before* anything is written, so a
+    # malformed or hostile parameter value can never smuggle shell syntax
+    # into whatever later step sources $BASH_ENV.
+    if ! [[ "${output_env_name}" =~ ^[A-Z_][A-Z0-9_]*$ ]]; then
+        echo "resolve_previous_deploy_tag: output_env \"${output_env_name}\" is not a safe environment variable name (expected uppercase letters, digits and underscores only, not starting with a digit); refusing to write to \$BASH_ENV." >&2
+        exit 1
+    fi
 
     # env_var_name parameter: read by indirection so callers can point this
     # command at any previously exported release-tag variable.
@@ -59,11 +71,16 @@ main() {
         | while IFS= read -r sha; do
             git tag --points-at "${sha}" \
                 | grep -E "${tag_regex}" \
-                | grep -v -x "${release_tag}"
+                | grep -v -F -x "${release_tag}"
         done | head -n1 || true)"
 
     if [ -n "${prev_tag}" ]; then
-        echo "export ${output_env_name}=\"${prev_tag}\"" >>"${BASH_ENV}"
+        # printf %q renders prev_tag as a single shell-safe token (quoting
+        # or escaping it only if its content actually requires that), so a
+        # tag value containing shell metacharacters cannot be executed when
+        # a later step sources $BASH_ENV.
+        printf -v prev_tag_safe '%q' "${prev_tag}"
+        echo "export ${output_env_name}=${prev_tag_safe}" >>"${BASH_ENV}"
         echo "resolve_previous_deploy_tag: previous release tag is ${prev_tag}"
     else
         echo "resolve_previous_deploy_tag: no previous release tag found (first release)"

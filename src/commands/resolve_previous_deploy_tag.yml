@@ -56,7 +56,11 @@ parameters:
     description: >
       Name of the environment variable to export (via $BASH_ENV) with the
       previous release tag. Left unset when no previous release tag is
-      found, so downstream steps must not assume it is always present.
+      found, so downstream steps must not assume it is always present. Must
+      resolve to a safe environment variable identifier (uppercase letters,
+      digits, and underscores, not starting with a digit) — the command
+      fails fast if it does not, since the value is written as a literal
+      shell identifier into $BASH_ENV.
 
 steps:
   - run:
