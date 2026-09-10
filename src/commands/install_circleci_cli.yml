@@ -1,0 +1,61 @@
+description: >
+  Installs the standalone CircleCI CLI (CircleCI-Public/circleci-cli) from a
+  GitHub Releases tarball, verified against a pinned sha256 checksum, so that
+  "circleci api ..." subcommands are available to later steps. This exists
+  because CircleCI's convenience images ship a "build-agent" binary at
+  /usr/bin/circleci that implements only the agent surface used to
+  orchestrate steps (checkout, cache, artifacts, "circleci-agent step
+  halt", ...) and does not include the "api" subcommand family, which
+  Deploy Diff Summaries and similar API-backed steps need. Installing to
+  install_path (default /usr/local/bin, which sits ahead of /usr/bin on
+  PATH on CircleCI's convenience images) makes a bare "circleci" call after
+  this step resolve to the standalone CLI, shadowing /usr/bin/circleci.
+  Any step that must keep using the build-agent specifically ("circleci-agent
+  step halt", or other build-agent-only tooling such as "run release")
+  should keep invoking it by its full path (/usr/bin/circleci) rather than
+  relying on PATH resolution after this command runs. The tarball + sha256
+  approach is used instead of upstream's "install.sh" (curl | sudo bash) so
+  the binary is verified before it is trusted; that install.sh-based path
+  is intentionally not offered by this orb.
+
+parameters:
+  version:
+    type: string
+    default: "1.0.49308"
+    description: >
+      The circleci-cli release version to install (without the leading
+      "v"), matching a release tag at
+      https://github.com/CircleCI-Public/circleci-cli/releases. Keep this in
+      lockstep with the "sha256" parameter's default -- both describe the
+      same release asset.
+  sha256:
+    type: string
+    default: "1beeaddd7f5652612bfd9a8a0a303bb966fb69a355d7bb9d036d537f8f9e8b17"
+    description: >
+      The expected sha256 checksum of that release's
+      "circleci-cli_<version>_linux_amd64.tar.gz" asset. Installation is
+      aborted if the downloaded tarball's checksum does not match.
+  install_path:
+    type: string
+    default: "/usr/local/bin"
+    description: >
+      Directory the "circleci" binary is installed into (via "sudo install
+      -m 0755"), matching the source step this command replaces.
+  skip_if_present:
+    type: boolean
+    default: true
+    description: >
+      When true (default), skip the download entirely if a "circleci"
+      binary is already on PATH and its "api --help" subcommand already
+      works -- i.e. it is already the standalone CLI, not just the
+      build-agent binary. Set to false to force a (re)install on every run.
+
+steps:
+  - run:
+      name: Install CircleCI CLI
+      environment:
+        PARAM_VERSION: <<parameters.version>>
+        PARAM_SHA256: <<parameters.sha256>>
+        PARAM_INSTALL_PATH: <<parameters.install_path>>
+        PARAM_SKIP_IF_PRESENT: <<parameters.skip_if_present>>
+      command: <<include(scripts/install_circleci_cli.sh)>>

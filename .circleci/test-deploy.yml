@@ -49,6 +49,16 @@ jobs:
       - run:
           name: Confirm trivy resolves to a working Trivy image
           command: trivy --version
+  # Exercises install_circleci_cli against the real GitHub Releases asset
+  # (sha256-verified), then confirms the standalone CLI's "api" subcommand
+  # -- absent from the build-agent's /usr/bin/circleci -- is now available.
+  test_install_circleci_cli:
+    executor: configurations/base_pinned
+    steps:
+      - configurations/install_circleci_cli
+      - run:
+          name: Confirm 'circleci api' is available after install
+          command: circleci api --help
 workflows:
   test-deploy:
     jobs:
@@ -57,6 +67,8 @@ workflows:
       - test_base_pinned_executor:
           filters: *filters
       - test_trivy_executor:
+          filters: *filters
+      - test_install_circleci_cli:
           filters: *filters
       # The orb must be re-packed for publishing, and saved to the workspace.
       - orb-tools/pack:
@@ -70,5 +82,6 @@ workflows:
             - orb-tools/pack
             - test_base_pinned_executor
             - test_trivy_executor
+            - test_install_circleci_cli
           context: orb-publishing
           filters: *release-filters
