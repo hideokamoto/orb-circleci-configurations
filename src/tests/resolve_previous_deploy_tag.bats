@@ -306,6 +306,39 @@ read_bash_env_var() {
     [ ! -s "${BASH_ENV}" ]
 }
 
+@test "tag_regex starting with a hyphen is not misread as a grep option during the commit walk" {
+    # Regression test: `grep -E "${tag_regex}"` (no `--`) treats a
+    # hyphen-led tag_regex value as a grep option rather than a pattern.
+    # "-n" is GNU grep's line-number flag, so `grep -E "-n"` with no
+    # pattern operand errors out (exit 2, "Usage: grep ..."), and that
+    # error is silently absorbed by the walk's trailing `|| true`,
+    # producing an empty prev_tag indistinguishable from a legitimate
+    # first release even though a matching previous tag exists on an
+    # ancestor commit. `grep -E -- "${tag_regex}"` must treat "-n" as the
+    # literal two-character pattern it is (matching any tag containing a
+    # "-n" substring) instead.
+    #
+    # Note: git refuses ref names that literally start with "-" (`fatal:
+    # ... is not a valid tag name`), so this test proves the fix via a
+    # hyphen-led *regex* matched against ordinary tags that merely contain
+    # "-n" as a substring, which is the exploitable shape here — the
+    # option-injection risk lives entirely in tag_regex, not in tag names.
+    make_commit "root" # untagged root ancestor; see file header note
+    make_commit "c1"
+    git tag "2026.09.10-nightly-abc0000" # the true previous release
+    make_commit "c2"
+    git tag "2026.09.10-nightly-def0000" # current release
+
+    export PARAM_TAG_REGEX='-n'
+    export RELEASE_TAG="2026.09.10-nightly-def0000"
+
+    source "${SCRIPT}"
+    run main
+    [ "$status" -eq 0 ]
+
+    [ "$(read_bash_env_var PREV_RELEASE_TAG)" = "2026.09.10-nightly-abc0000" ]
+}
+
 @test "prev_tag containing shell metacharacters round-trips safely through export and source" {
     # Regression test for the $BASH_ENV injection risk: an unescaped tag
     # value embedding a command substitution would execute when a later

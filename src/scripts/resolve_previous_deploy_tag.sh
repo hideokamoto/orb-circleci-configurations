@@ -91,7 +91,7 @@ main() {
     prev_tag="$(git log --pretty=tformat:'%H' "${release_commit}" \
         | while IFS= read -r sha; do
             git tag --points-at "${sha}" \
-                | grep -E "${tag_regex}" \
+                | grep -E -- "${tag_regex}" \
                 | grep -v -F -x "${release_tag}"
         done | head -n1 || true)"
 
