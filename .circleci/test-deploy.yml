@@ -49,6 +49,37 @@ jobs:
       - run:
           name: Confirm trivy resolves to a working Trivy image
           command: trivy --version
+  # Exercises resolve_previous_deploy_tag against a disposable local git
+  # history instead of this orb repo's own history, so the test never
+  # depends on (or perturbs) real tags.
+  test_resolve_previous_deploy_tag:
+    executor: configurations/base_pinned
+    working_directory: /tmp/resolve-prev-tag-test
+    steps:
+      - run:
+          name: Build a temporary release history (root, c1 tagged, c2 tagged/release)
+          command: |
+            set -euo pipefail
+            git init -q
+            git config user.name "Test User"
+            git config user.email "test@example.com"
+            git config commit.gpgsign false
+            git config tag.gpgsign false
+            echo root >> file.txt && git add file.txt && git commit -q -m root
+            echo c1 >> file.txt && git add file.txt && git commit -q -m c1
+            git tag "2026.01.01-aaaaaaa"
+            echo c2 >> file.txt && git add file.txt && git commit -q -m c2
+            git tag "2026.01.01-bbbbbbb"
+            echo 'export RELEASE_TAG="2026.01.01-bbbbbbb"' >> "$BASH_ENV"
+      - configurations/resolve_previous_deploy_tag
+      - run:
+          name: Assert PREV_RELEASE_TAG was resolved to the true previous release
+          command: |
+            if [ "${PREV_RELEASE_TAG:-}" != "2026.01.01-aaaaaaa" ]; then
+              echo "expected PREV_RELEASE_TAG=2026.01.01-aaaaaaa, got '${PREV_RELEASE_TAG:-<unset>}'" >&2
+              exit 1
+            fi
+            echo "PREV_RELEASE_TAG correctly resolved to ${PREV_RELEASE_TAG}"
 workflows:
   test-deploy:
     jobs:
@@ -57,6 +88,8 @@ workflows:
       - test_base_pinned_executor:
           filters: *filters
       - test_trivy_executor:
+          filters: *filters
+      - test_resolve_previous_deploy_tag:
           filters: *filters
       # The orb must be re-packed for publishing, and saved to the workspace.
       - orb-tools/pack:
@@ -70,5 +103,6 @@ workflows:
             - orb-tools/pack
             - test_base_pinned_executor
             - test_trivy_executor
+            - test_resolve_previous_deploy_tag
           context: orb-publishing
           filters: *release-filters
