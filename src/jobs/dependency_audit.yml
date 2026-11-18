@@ -1,0 +1,72 @@
+description: >
+  Run the dependency audit for the checked-out repo (pnpm or npm, detected from
+  the lockfile). On failure, optionally ask CircleCI's Chunk agent to open a
+  `fix(deps):` pull request and report the outcome to Slack. Attach the
+  `circleci` (CIRCLE_TOKEN), `github` (GITHUB_TOKEN) and `slack` contexts to
+  this job in the consuming workflow — see examples/dependency_audit.yml.
+executor:
+  name: node/default
+  tag: <<parameters.tag>>
+resource_class: <<parameters.resource_class>>
+parameters:
+  tag:
+    type: string
+    default: lts
+    description: cimg/node image variant for the node/default executor.
+  resource_class:
+    type: string
+    default: small
+    description: Resource class of the audit container.
+  audit_level:
+    type: string
+    default: high
+    description: Severity threshold passed to `<pm> audit --audit-level`.
+  chunk_fix:
+    type: boolean
+    default: true
+    description: Ask Chunk to open a fix PR when the audit fails.
+  slack_notify:
+    type: boolean
+    default: true
+    description: Post the failure to Slack via the slack orb.
+steps:
+  - checkout
+  - audit_deps:
+      audit_level: <<parameters.audit_level>>
+  - when:
+      condition: <<parameters.chunk_fix>>
+      steps:
+        - run:
+            name: Ask Chunk to open a fix PR
+            when: on_fail
+            environment:
+              DEP_AUDIT_LEVEL: <<parameters.audit_level>>
+            command: <<include(scripts/chunk_audit_fix.sh)>>
+  - when:
+      condition: <<parameters.slack_notify>>
+      steps:
+        - slack/notify:
+            event: fail
+            custom: |
+              {
+                "text": "定期依存 audit が失敗しました (${CIRCLE_PROJECT_REPONAME} / ${CIRCLE_BRANCH})",
+                "blocks": [
+                  {
+                    "type": "section",
+                    "text": {
+                      "type": "mrkdwn",
+                      "text": ":rotating_light: *定期依存 audit が失敗しました* (${CIRCLE_PROJECT_REPONAME} / ${CIRCLE_BRANCH})\n${CHUNK_AUDIT_FIX_SUMMARY}"
+                    }
+                  },
+                  {
+                    "type": "actions",
+                    "elements": [
+                      {
+                        "type": "button",
+                        "text": { "type": "plain_text", "text": "ジョブを開く" },
+                        "url": "${CIRCLE_BUILD_URL}"
+                      }
+                    ]
+                  }
+                ]
+              }
