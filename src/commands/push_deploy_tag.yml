@@ -6,16 +6,18 @@ description: >
   idempotent instead of failing on a duplicate tag push. Ported from the
   "Push git tag on success" step duplicated across 5 deploy workflows in
   circleci-configurations (aws-cdk, aws-cdk-arm64, aws-cdkd, aws-cdkd-arm64,
-  cloudflare-workers).
+  cloudflare-workers). Those workflows now run that step in a dedicated
+  `tag-release` job that `requires` the production deploy job, so a
+  transient failure installing the GitHub CLI cannot fail the deploy itself.
 
   Push authentication against "origin" (e.g. via the `gh/setup` command
   from the `circleci/github-cli` orb) must already be configured by the
   caller before this command runs; this command does not call `gh/setup`
-  itself, matching the source, which relied on the same job having already
-  authenticated earlier in its steps. Likewise, gating this command to only
-  run after a successful deploy (`when: on_success` on the invoking step,
-  or an equivalent step-list gate) is the caller's responsibility, exactly
-  as in the source.
+  itself, matching the source's `tag-release` job, which runs `gh/setup` as
+  an earlier step. Likewise, running this command only after a successful
+  deploy is the caller's responsibility: the source gates it through the
+  `tag-release` job's `requires` on the deploy job; `when: on_success` on the
+  invoking step works for a single-job layout.
 
   Behavior difference from the source: the source computed the tag's date
   with plain `date +<format>`, which resolves in the runner's local
