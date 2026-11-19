@@ -1,0 +1,22 @@
+description: >
+  Pipeline config for a project's scheduled dependency audit. Wire this file as
+  the pipeline's Config Source (checkout stays on the target repo) and give the
+  pipeline a daily schedule trigger in Terraform (circleci-infra).
+usage:
+  version: 2.1
+
+  orbs:
+    configurations: hideokamoto/configurations@x.y.z
+
+  workflows:
+    dependency-audit:
+      jobs:
+        - configurations/dependency_audit:
+            # Chunk run trigger + open-PR lookup + Slack notify.
+            context:
+              - circleci
+              - github
+              - slack
+            # audit_level: high    # optional
+            # chunk_fix: true      # optional
+            # slack_notify: true   # optional
