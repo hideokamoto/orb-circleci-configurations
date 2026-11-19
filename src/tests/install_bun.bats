@@ -107,6 +107,17 @@ teardown() {
   grep -q 'export PATH="${HOME}/.bun/bin:${PATH}"' "${BASH_ENV}"
 }
 
+@test "does not abort when an earlier step left an export of an unset variable in BASH_ENV" {
+  export PARAM_VERSION="1.3.14"
+  # Re-sourcing $BASH_ENV under `set -u` would die on this line.
+  printf 'export EARLIER_STEP_VALUE="$SOME_VAR_THAT_IS_NOT_SET"\n' >> "${BASH_ENV}"
+
+  run bash "${SCRIPT}"
+  [ "$status" -eq 0 ]
+  [ "$("${HOME}/.bun/bin/bun" --version)" = "v1.3.14" ]
+  grep -q 'export PATH="${HOME}/.bun/bin:${PATH}"' "${BASH_ENV}"
+}
+
 @test "reinstalls when the cached bun version does not match" {
   export PARAM_VERSION="1.3.14"
 

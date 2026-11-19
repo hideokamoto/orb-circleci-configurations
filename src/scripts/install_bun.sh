@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Installs a pinned bun toolchain, matching the install/verify/reinstall
 # behavior duplicated across workflows/validation/aidlc*.yaml and
-# workflows/publish/npm-polyrepo-bun.yaml in the source repo:
+# workflows/publish/npm-polyrepo-bun-semantic-release.yaml in the source repo:
 #   1. If ~/.bun/bin/bun is not already present (e.g. restored from cache),
 #      install the pinned version.
 #   2. Put ~/.bun/bin on PATH via $BASH_ENV so later steps see it.
@@ -49,8 +49,9 @@ install_bun() {
 #   a reinstall still doesn't produce the expected version.
 # Side effects:
 #   May install/reinstall bun under ~/.bun (see install_bun). Appends a
-#   PATH export for ~/.bun/bin to $BASH_ENV and sources it into the current
-#   shell so `bun` resolves for the rest of this process and later steps.
+#   PATH export for ~/.bun/bin to $BASH_ENV for later steps, and exports the
+#   same PATH in the current shell so `bun` resolves for the rest of this
+#   process.
 #   On a version mismatch, deletes ~/.bun before reinstalling, and prints a
 #   stderr warning that (because CircleCI caches are immutable) this
 #   reinstall will not update whatever cache was already saved under the
@@ -66,8 +67,10 @@ main() {
   fi
 
   echo "export PATH=\"\${HOME}/.bun/bin:\${PATH}\"" >> "$BASH_ENV"
-  # shellcheck disable=SC1090
-  source "$BASH_ENV"
+  # Export PATH directly rather than re-sourcing $BASH_ENV: that file holds
+  # every earlier step's exports, and any of them referencing an unset
+  # variable would abort this script under `set -u`.
+  export PATH="${HOME}/.bun/bin:${PATH}"
 
   local actual_version
   actual_version="$(bun --version | sed 's/^v//')"
