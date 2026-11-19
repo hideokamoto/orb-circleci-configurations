@@ -39,6 +39,7 @@ teardown() {
   [ "$status" -eq 0 ]
   echo "$output" | grep -q 'package manager: pnpm'
   grep -q "DEP_AUDIT_PM='pnpm'" "$BASH_ENV"
+  grep -q "DEP_AUDIT_RESULT='success'" "$BASH_ENV"
   grep -qx 'pnpm audit --audit-level=high' "$STUB_LOG"
 }
 
@@ -49,7 +50,17 @@ teardown() {
   [ "$status" -eq 0 ]
   echo "$output" | grep -q 'package manager: npm'
   grep -q "DEP_AUDIT_PM='npm'" "$BASH_ENV"
+  grep -q "DEP_AUDIT_RESULT='success'" "$BASH_ENV"
   grep -qx 'npm audit --audit-level=high' "$STUB_LOG"
+}
+
+@test "audit_deps.sh exports DEP_AUDIT_RESULT='failed' when the audit itself finds advisories" {
+  printf '{"name":"fixture"}\n' >package.json
+  touch package-lock.json
+  printf '#!/usr/bin/env bash\necho "npm $*" >>"%s"\nexit 1\n' "$STUB_LOG" >"${STUBBIN}/npm"
+  run bash "${REPO_ROOT}/src/scripts/audit_deps.sh"
+  [ "$status" -eq 1 ]
+  grep -q "DEP_AUDIT_RESULT='failed'" "$BASH_ENV"
 }
 
 @test "audit_deps.sh fails when nothing identifies a package manager" {
@@ -124,5 +135,17 @@ teardown() {
   run bash "${REPO_ROOT}/src/scripts/chunk_audit_fix.sh"
   [ "$status" -eq 0 ]
   echo "$output" | grep -q 'DEP_AUDIT_PM'
+  grep -q 'CHUNK_AUDIT_FIX_SUMMARY' "$BASH_ENV"
+}
+
+@test "chunk_audit_fix.sh skips cleanly when DEP_AUDIT_RESULT is not 'failed'" {
+  # Simulates a caller-defined job where some unrelated step fails after a
+  # *successful* audit: on_fail still runs this script, but DEP_AUDIT_PM
+  # alone (left over from the successful audit) must not be enough to
+  # trigger Chunk.
+  export CIRCLE_TOKEN=dummy GITHUB_TOKEN=dummy DEP_AUDIT_PM=npm DEP_AUDIT_RESULT=success
+  run bash "${REPO_ROOT}/src/scripts/chunk_audit_fix.sh"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'DEP_AUDIT_RESULT'
   grep -q 'CHUNK_AUDIT_FIX_SUMMARY' "$BASH_ENV"
 }

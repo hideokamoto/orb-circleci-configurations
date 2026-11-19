@@ -28,13 +28,13 @@ it will provide:
 - **SBOM generation** — producing a CycloneDX SBOM with Trivy and forwarding
   it to a webhook (e.g. Port).
 
-This repository is in **Phase 0** of its migration: the orb currently ships
-only the digest-pinned base executors described below. Commands, jobs, and
-the remaining executors land in later phases (tracked in this repo's issues)
-and this README's component list will grow to match as they ship. Each
-component's own `description` (visible via `circleci orb info` and the orb
-registry) is the source of truth for its exact contract; this README is the
-map, not the spec.
+This repository is in **Phase 0** of its migration: besides the digest-pinned
+base executors, a dependency-audit command/job has also landed early. The
+rest of the items listed above land in later phases (tracked in this repo's
+issues) and this README's component list will grow to match as they ship.
+Each component's own `description` (visible via `circleci orb info` and the
+orb registry) is the source of truth for its exact contract; this README is
+the map, not the spec.
 
 ---
 
@@ -44,6 +44,9 @@ map, not the spec.
 | --- | --- | --- |
 | executor | `base_pinned` | Digest-pinned `cimg/base` image for lightweight, non-language-specific steps. |
 | executor | `trivy` | Digest-pinned `aquasec/trivy` image for SBOM generation and vulnerability scanning. |
+| command | `audit_deps` | Detects the checkout's package manager (pnpm/npm) and runs its security audit. |
+| command | `chunk_audit_fix` | Asks CircleCI's Chunk agent to open a `fix(deps):` PR after a failed dependency audit. |
+| job | `dependency_audit` | Runs `audit_deps`, then on failure `chunk_audit_fix` and a Slack notification. |
 
 Both executors pin their Docker image by digest rather than by a mutable tag
 (such as `:current`), so a given commit's CI behavior stays reproducible over
@@ -53,11 +56,17 @@ review for `trivy`); in short:
 
 1. Pull the new tag and resolve its current digest:
    ```bash
-   docker pull cimg/base:<new-tag>   # or aquasec/trivy:<new-tag>
+   docker pull cimg/base:<new-tag>
    docker inspect --format='{{index .RepoDigests 0}}' cimg/base:<new-tag>
+
+   # Trivy: same idea, review Aqua Security's advisories for the new tag first
+   docker pull aquasec/trivy:<new-tag>
+   docker inspect --format='{{index .RepoDigests 0}}' aquasec/trivy:<new-tag>
    ```
-2. Update both the `tag` parameter default and the pinned digest in the
-   executor's `image:` field together — never the digest alone, since that
+2. Update the executor's `digest` parameter default (not the tag reference
+   in an `image:` field — both executors only hold the digest there, pinned
+   via the `digest` parameter) together with the corresponding tag mentioned
+   in that parameter's own `description` — never the digest alone, since that
    would silently decouple the human-readable tag from what actually runs.
 
 ## `src/` layout and development flow

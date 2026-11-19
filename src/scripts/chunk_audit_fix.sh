@@ -19,7 +19,11 @@
 # Environment:
 #   CIRCLE_TOKEN, GITHUB_TOKEN   from the circleci / github contexts
 #   DEP_AUDIT_LEVEL              severity that failed (default: high)
-#   DEP_AUDIT_PM                 set by the audit step; re-detected when absent
+#   DEP_AUDIT_PM                 set by audit_deps.sh
+#   DEP_AUDIT_RESULT             set by audit_deps.sh; must be 'failed' or
+#                                this script skips, since a caller-supplied
+#                                `when: on_fail` fires on any job failure,
+#                                not specifically this audit's
 #   BASH_ENV                     CHUNK_AUDIT_FIX_SUMMARY is exported here for
 #                                a later slack/notify step
 
@@ -72,6 +76,16 @@ command -v jq >/dev/null 2>&1 || finish 0 "jq が無いため Chunk を起動し
 # failure that was never actually an npm audit.
 if [[ -z "${DEP_AUDIT_PM:-}" ]]; then
   finish 0 "DEP_AUDIT_PM が設定されていない（パッケージマネージャーを判定できなかった）ため Chunk を起動していません"
+fi
+
+# This public command is meant to be called after audit_deps in a
+# caller-defined job, typically with `when: on_fail`. CircleCI's on_fail is
+# job-wide — it fires if *anything* earlier in the job failed, not
+# specifically this audit — so DEP_AUDIT_PM being set (even from a
+# successful audit) isn't enough to know the audit itself failed. Require
+# audit_deps.sh's own explicit result instead.
+if [[ "${DEP_AUDIT_RESULT:-}" != failed ]]; then
+  finish 0 "DEP_AUDIT_RESULT が 'failed' ではない（audit_deps 自体は失敗していない可能性がある）ため Chunk を起動していません"
 fi
 
 BRANCH="${CIRCLE_BRANCH:-main}"

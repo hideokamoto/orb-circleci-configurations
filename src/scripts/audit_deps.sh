@@ -6,7 +6,14 @@
 # Environment:
 #   DEP_AUDIT_LEVEL       audit severity threshold (default: high)
 #   DEP_AUDIT_PM_OVERRIDE "pnpm" or "npm" to skip lockfile auto-detection
-#   BASH_ENV              DEP_AUDIT_PM is exported here for later steps
+#   BASH_ENV              DEP_AUDIT_PM and DEP_AUDIT_RESULT ('success' or
+#                         'failed', only once the audit command itself ran)
+#                         are exported here for later steps. A later on_fail
+#                         step (chunk_audit_fix.sh) must check
+#                         DEP_AUDIT_RESULT == 'failed' explicitly rather than
+#                         trusting CircleCI's job-wide on_fail: that fires
+#                         whenever *anything* earlier in the job failed, not
+#                         specifically this audit.
 
 set -uo pipefail
 
@@ -87,3 +94,13 @@ esac
 
 echo "[dependency-audit] running: ${AUDIT_CMD[*]}"
 "${AUDIT_CMD[@]}"
+AUDIT_STATUS=$?
+
+if [[ -n "${BASH_ENV:-}" ]]; then
+  if [[ "$AUDIT_STATUS" -eq 0 ]]; then
+    echo "export DEP_AUDIT_RESULT='success'" >>"$BASH_ENV"
+  else
+    echo "export DEP_AUDIT_RESULT='failed'" >>"$BASH_ENV"
+  fi
+fi
+exit "$AUDIT_STATUS"
