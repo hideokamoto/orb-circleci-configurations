@@ -90,12 +90,16 @@ workflows:
       # The orb must be re-packed for publishing, and saved to the workspace.
       - orb-tools/pack:
           filters: *filters
-      # Publish a dev orb on every non-tag build so changes can be tried as
-      # hideokamoto/configurations@dev:alpha before a semver release.
+      # Dev orbs. dev:alpha is consumed by real pipelines, so only main may
+      # move it; every other branch publishes an immutable-per-commit
+      # dev:<SHA1> label instead, so an unreviewed PR build can never change
+      # what dev:alpha consumers run.
       - orb-tools/publish:
+          name: publish-dev-main
           orb_name: hideokamoto/configurations
           vcs_type: << pipeline.project.type >>
           pub_type: dev
+          dev_tags: dev:${CIRCLE_SHA1},dev:alpha
           requires:
             - orb-tools/pack
             - test_base_pinned_executor
@@ -103,6 +107,25 @@ workflows:
             - test_dependency_audit
           context: circleci
           filters:
+            branches:
+              only: main
+            tags:
+              ignore: /.*/
+      - orb-tools/publish:
+          name: publish-dev-branch
+          orb_name: hideokamoto/configurations
+          vcs_type: << pipeline.project.type >>
+          pub_type: dev
+          dev_tags: dev:${CIRCLE_SHA1}
+          requires:
+            - orb-tools/pack
+            - test_base_pinned_executor
+            - test_trivy_executor
+            - test_dependency_audit
+          context: circleci
+          filters:
+            branches:
+              ignore: main
             tags:
               ignore: /.*/
       - orb-tools/publish:
