@@ -1,0 +1,19 @@
+description: >
+  Ask CircleCI's Chunk agent to open a `fix(deps):` pull request for a failed
+  dependency audit. Resolves the org, project and `chunk-task-pipeline`
+  definition through the CircleCI API at runtime, so no ids are stored in the
+  repo. Skips quietly when the required tokens or the Chunk definition are
+  absent, or when an open fix PR already exists. Requires the `circleci`
+  (CIRCLE_TOKEN) and `github` (GITHUB_TOKEN) contexts on the calling job.
+parameters:
+  audit_level:
+    type: string
+    default: high
+    description: Audit severity that failed; only used inside the fix prompt.
+steps:
+  - run:
+      name: Ask Chunk to open a fix PR
+      when: on_fail
+      environment:
+        DEP_AUDIT_LEVEL: <<parameters.audit_level>>
+      command: <<include(scripts/chunk_audit_fix.sh)>>

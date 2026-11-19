@@ -16,3 +16,4 @@ orbs:
   node: circleci/node@7.2.1
   aws-cli: circleci/aws-cli@5.4.2
   gh: circleci/github-cli@2.7.2
+  slack: circleci/slack@6.1.3
