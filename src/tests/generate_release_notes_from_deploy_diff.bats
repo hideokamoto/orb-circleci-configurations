@@ -238,7 +238,77 @@ line5
   [ "$(echo "$result" | jq -r '.[0].deletions')" = "0" ]
 }
 
+@test "build_files_json omits the patch for lockfiles, including nested ones" {
+  commit_file "pnpm-lock.yaml" "lockfileVersion: 1"
+  mkdir -p packages/app
+  commit_file "packages/app/package-lock.json" "{}"
+  commit_file "src.txt" "v1"
+  BASE_SHA="$(git rev-parse HEAD)"
+  printf 'lockfileVersion: 2\n' > pnpm-lock.yaml
+  printf '{"v":2}\n' > packages/app/package-lock.json
+  printf 'v2\n' > src.txt
+  git add -A && git commit -q -m "bump"
+  HEAD_SHA="$(git rev-parse HEAD)"
+
+  source "$PAYLOAD_SCRIPT" bats-core
+  result="$(build_files_json "${BASE_SHA}..${HEAD_SHA}")"
+
+  [ "$(echo "$result" | jq 'length')" -eq 3 ]
+  [ "$(echo "$result" | jq -r '.[] | select(.filename == "pnpm-lock.yaml") | has("patch")')" = "false" ]
+  [ "$(echo "$result" | jq -r '.[] | select(.filename == "packages/app/package-lock.json") | has("patch")')" = "false" ]
+  [ "$(echo "$result" | jq -r '.[] | select(.filename == "src.txt") | has("patch")')" = "true" ]
+  # additions/deletions are still reported for an omitted patch.
+  [ "$(echo "$result" | jq -r '.[] | select(.filename == "pnpm-lock.yaml") | .additions')" = "1" ]
+}
+
+@test "build_files_json omits the patch for binary files" {
+  printf '\x00\x01binary-v1\xff' > blob.bin
+  git add blob.bin && git commit -q -m "add binary"
+  BASE_SHA="$(git rev-parse HEAD)"
+  printf '\x00\x01binary-v2\xfe' > blob.bin
+  git add blob.bin && git commit -q -m "change binary"
+  HEAD_SHA="$(git rev-parse HEAD)"
+
+  source "$PAYLOAD_SCRIPT" bats-core
+  result="$(build_files_json "${BASE_SHA}..${HEAD_SHA}")"
+
+  [ "$(echo "$result" | jq -r '.[0] | has("patch")')" = "false" ]
+}
+
+@test "build_files_json caps each patch at MAX_PATCH_BYTES" {
+  commit_file "big.txt" "seed"
+  BASE_SHA="$(git rev-parse HEAD)"
+  head -c 200000 /dev/zero | tr '\0' 'x' | fold -w 100 > big.txt
+  git add big.txt && git commit -q -m "grow big.txt"
+  HEAD_SHA="$(git rev-parse HEAD)"
+
+  source "$PAYLOAD_SCRIPT" bats-core
+  result="$(build_files_json "${BASE_SHA}..${HEAD_SHA}")"
+
+  [ "$(echo "$result" | jq -r '.[0].patch | utf8bytelength')" -eq 32768 ]
+}
+
 # ---- make_diff_summary_payload.sh: build_payload / empty range -------------
+
+@test "build_payload succeeds when the files array exceeds the single-argument limit (ARG_MAX regression)" {
+  # Six ~30KB patches make a files array well over the ~128KB single-argument
+  # limit that the previous `jq --argjson files` hit (E2BIG).
+  commit_file "seed.txt" "seed"
+  BASE_SHA="$(git rev-parse HEAD)"
+  for i in 1 2 3 4 5 6; do
+    head -c 30000 /dev/zero | tr '\0' "$i" | fold -w 100 > "f${i}.txt"
+  done
+  git add -A && git commit -q -m "add six large files"
+  HEAD_SHA="$(git rev-parse HEAD)"
+
+  source "$PAYLOAD_SCRIPT" bats-core
+  run build_payload "$BASE_SHA" "$HEAD_SHA" "org-abc" "proj-123"
+
+  [ "$status" -eq 0 ]
+  [ "$(echo "$output" | jq -r '.diff.files | length')" -eq 6 ]
+  [ "$(echo "$output" | jq -r '.diff.commit_messages[0]')" = "add six large files" ]
+  [ "$(echo "$output" | wc -c)" -gt 150000 ]
+}
 
 @test "build_payload returns empty commit_messages and files for an empty range" {
   commit_file "a.txt" "hello"

@@ -44,6 +44,27 @@ status_to_word() {
   esac
 }
 
+# Patch bodies are optional in the Deploy Diff Summaries API. Lockfiles are
+# omitted entirely: a dependency bump rewrites thousands of lockfile lines
+# that carry no release-note signal and dominate the payload size. Matched by
+# basename so nested lockfiles in a monorepo are omitted too.
+# Args:
+#   $1 - path - a repository-relative file path.
+# Returns:
+#   0 when the patch for this path should be omitted, 1 otherwise.
+omit_patch_for_file() {
+  case "${1##*/}" in
+    pnpm-lock.yaml|package-lock.json|npm-shrinkwrap.json|yarn.lock|bun.lock|bun.lockb|Gemfile.lock|Cargo.lock|composer.lock|poetry.lock)
+      return 0 ;;
+    *)
+      return 1 ;;
+  esac
+}
+
+# Maximum bytes of each file's patch sent to the API (same cap as the
+# source's 53e396e ARG_MAX fix).
+MAX_PATCH_BYTES=32768
+
 # Builds the payload's `files` array for a git revision range.
 #
 # `git diff --name-status -z -M --diff-filter=ACDMRT` emits rename/copy
@@ -58,7 +79,7 @@ status_to_word() {
 #   working tree via `git`/`jq`; has no other side effects.
 build_files_json() {
   local range="$1"
-  local status filename old_path status_word additions deletions additions_num deletions_num file_obj pathspecs _
+  local status filename old_path status_word additions deletions additions_num deletions_num file_obj pathspecs diff_tmp _
   local file_objs=()
 
   while IFS= read -r -d '' status; do
@@ -104,13 +125,30 @@ build_files_json() {
     # -c (compact, single-line output) so each entry can be collected as one
     # array element and slurped in a single jq pass below, instead of
     # re-parsing/re-serializing the whole growing array on every file (an
-    # O(n^2) jq-subprocess pattern for diffs with many files).
-    file_obj="$(
-      git diff -M "$range" -- "${pathspecs[@]}" | jq -R -s -c \
-        --arg filename "$filename" --arg status "$status_word" \
-        --argjson additions "$additions_num" --argjson deletions "$deletions_num" \
-        '{filename: $filename, status: $status, additions: $additions, deletions: $deletions, patch: .}'
-    )"
+    # O(n^2) jq-subprocess pattern for diffs with many files). The patch is
+    # read from stdin, never passed as an argument, so its size can't hit
+    # ARG_MAX; it is omitted for lockfiles and binaries ("-" numstat) and
+    # capped at MAX_PATCH_BYTES otherwise. The diff goes to a temp file first
+    # so `head -c` closing the pipe early can't SIGPIPE `git diff` under
+    # pipefail.
+    if omit_patch_for_file "$filename" || [ "${additions:-}" = "-" ]; then
+      file_obj="$(
+        jq -n -c \
+          --arg filename "$filename" --arg status "$status_word" \
+          --argjson additions "$additions_num" --argjson deletions "$deletions_num" \
+          '{filename: $filename, status: $status, additions: $additions, deletions: $deletions}'
+      )"
+    else
+      diff_tmp="$(mktemp)"
+      git diff -M "$range" -- "${pathspecs[@]}" > "$diff_tmp"
+      file_obj="$(
+        head -c "$MAX_PATCH_BYTES" "$diff_tmp" | jq -R -s -c \
+          --arg filename "$filename" --arg status "$status_word" \
+          --argjson additions "$additions_num" --argjson deletions "$deletions_num" \
+          '{filename: $filename, status: $status, additions: $additions, deletions: $deletions, patch: .}'
+      )"
+      rm -f "$diff_tmp"
+    fi
     file_objs+=("$file_obj")
   done < <(git diff --name-status -z -M --diff-filter=ACDMRT "$range")
 
@@ -135,7 +173,7 @@ build_files_json() {
 build_payload() {
   local base_ref="$1" head_ref="$2" org_id="$3" project_id="$4"
   local range="${base_ref}..${head_ref}"
-  local commit_messages_json files_json
+  local tmp_dir rc=0
 
   # A base_ref/head_ref that can't be resolved locally (shallow clone,
   # unfetched tag, typo'd sha) makes `git log`/`git diff` below fail, but
@@ -150,15 +188,26 @@ build_payload() {
     return 1
   fi
 
-  commit_messages_json="$(git log --format=%s "$range" | jq -R -s 'split("\n") | map(select(length > 0))')"
-  files_json="$(build_files_json "$range")"
-
-  jq -n \
-    --arg org_id "$org_id" \
-    --arg project_id "$project_id" \
-    --argjson commit_messages "$commit_messages_json" \
-    --argjson files "$files_json" \
-    '{org_id: $org_id, project_id: $project_id, diff: {commit_messages: $commit_messages, files: $files}}'
+  # The commit messages and files arrays are handed to the final jq via temp
+  # files (--slurpfile), never as --argjson arguments: a single argument over
+  # ~128KB fails with "Argument list too long" (E2BIG), which large ranges
+  # such as dependency bumps easily exceed. Ported from the source's 53e396e
+  # ARG_MAX fix.
+  tmp_dir="$(mktemp -d)" || return 1
+  git log --format=%s "$range" | jq -R -s 'split("\n") | map(select(length > 0))' > "${tmp_dir}/commit_messages.json" || rc=$?
+  if [ "$rc" -eq 0 ]; then
+    build_files_json "$range" > "${tmp_dir}/files.json" || rc=$?
+  fi
+  if [ "$rc" -eq 0 ]; then
+    jq -n \
+      --arg org_id "$org_id" \
+      --arg project_id "$project_id" \
+      --slurpfile commit_messages "${tmp_dir}/commit_messages.json" \
+      --slurpfile files "${tmp_dir}/files.json" \
+      '{org_id: $org_id, project_id: $project_id, diff: {commit_messages: $commit_messages[0], files: $files[0]}}' || rc=$?
+  fi
+  rm -rf "$tmp_dir"
+  return "$rc"
 }
 
 # Resolves the CircleCI organization id: $CIRCLE_ORGANIZATION_ID when set
