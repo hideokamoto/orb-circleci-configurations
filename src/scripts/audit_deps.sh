@@ -11,16 +11,21 @@
 set -uo pipefail
 
 detect_pm() {
-  # Specific lockfiles are checked before the package.json fallback below,
-  # so a yarn.lock/bun.lock repo that also has a package.json (almost every
-  # one does) is never misclassified as npm.
+  # An actual npm lockfile (package-lock.json/npm-shrinkwrap.json) outranks
+  # bun/yarn, same as before — this only changes which check runs last: a
+  # bare package.json, with none of the other lockfiles present either, is
+  # the npm fallback, checked after bun/yarn so a yarn.lock/bun.lock repo
+  # (which almost always also has a package.json) is never misclassified as
+  # npm just because it lacks a package-lock.json.
   if [[ -f pnpm-lock.yaml || -f pnpm-workspace.yaml ]]; then
     echo pnpm
+  elif [[ -f package-lock.json || -f npm-shrinkwrap.json ]]; then
+    echo npm
   elif [[ -f bun.lock || -f bun.lockb ]]; then
     echo bun
   elif [[ -f yarn.lock ]]; then
     echo yarn
-  elif [[ -f package-lock.json || -f npm-shrinkwrap.json || -f package.json ]]; then
+  elif [[ -f package.json ]]; then
     # A lockfile-less package.json is still provisionally "npm" here; the
     # npm case below is the single place that enforces a lockfile actually
     # exists, so the same check applies whether npm was auto-detected or

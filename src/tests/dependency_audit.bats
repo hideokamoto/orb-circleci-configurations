@@ -96,6 +96,15 @@ teardown() {
   [ ! -s "$STUB_LOG" ]
 }
 
+@test "audit_deps.sh prefers npm's own lockfile over a coexisting yarn.lock" {
+  printf '{"name":"fixture"}\n' >package.json
+  touch package-lock.json yarn.lock
+  run bash "${REPO_ROOT}/src/scripts/audit_deps.sh"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'package manager: npm'
+  grep -qx 'npm audit --audit-level=high' "$STUB_LOG"
+}
+
 @test "chunk_audit_fix.sh skips cleanly when CIRCLE_TOKEN is unset" {
   run bash "${REPO_ROOT}/src/scripts/chunk_audit_fix.sh"
   [ "$status" -eq 0 ]
