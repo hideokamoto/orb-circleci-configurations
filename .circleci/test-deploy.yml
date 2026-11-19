@@ -101,7 +101,7 @@ workflows:
             - test_base_pinned_executor
             - test_trivy_executor
             - test_dependency_audit
-          context: orb-publishing
+          context: circleci
           filters:
             tags:
               ignore: /.*/
@@ -115,5 +115,5 @@ workflows:
             - test_base_pinned_executor
             - test_trivy_executor
             - test_dependency_audit
-          context: orb-publishing
+          context: circleci
           filters: *release-filters
