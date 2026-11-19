@@ -28,13 +28,13 @@ it will provide:
 - **SBOM generation** — producing a CycloneDX SBOM with Trivy and forwarding
   it to a webhook (e.g. Port).
 
-This repository is in **Phase 0** of its migration: the orb currently ships
-only the digest-pinned base executors described below. Commands, jobs, and
-the remaining executors land in later phases (tracked in this repo's issues)
-and this README's component list will grow to match as they ship. Each
-component's own `description` (visible via `circleci orb info` and the orb
-registry) is the source of truth for its exact contract; this README is the
-map, not the spec.
+This repository is in **Phase 0** of its migration: besides the digest-pinned
+base executors, a dependency-audit command/job has also landed early. The
+rest of the items listed above land in later phases (tracked in this repo's
+issues) and this README's component list will grow to match as they ship.
+Each component's own `description` (visible via `circleci orb info` and the
+orb registry) is the source of truth for its exact contract; this README is
+the map, not the spec.
 
 ---
 
@@ -44,12 +44,30 @@ map, not the spec.
 | --- | --- | --- |
 | executor | `base_pinned` | Digest-pinned `cimg/base` image for lightweight, non-language-specific steps. |
 | executor | `trivy` | Digest-pinned `aquasec/trivy` image for SBOM generation and vulnerability scanning. |
+| command | `audit_deps` | Detects the checkout's package manager (pnpm/npm) and runs its security audit. |
+| command | `chunk_audit_fix` | Asks CircleCI's Chunk agent to open a `fix(deps):` PR after a failed dependency audit. |
+| job | `dependency_audit` | Runs `audit_deps`, then on failure `chunk_audit_fix` and a Slack notification. |
 
 Both executors pin their Docker image by digest rather than by a mutable tag
 (such as `:current`), so a given commit's CI behavior stays reproducible over
-time. See each executor's `description` in `src/executors/` for the update
-procedure — in short, update the tag and digest together after confirming the
-new image is safe to use.
+time. See each executor's `description` in `src/executors/` for the full
+update procedure (monthly tag check for `base_pinned`, Aqua Security advisory
+review for `trivy`); in short:
+
+1. Pull the new tag and resolve its current digest:
+   ```bash
+   docker pull cimg/base:<new-tag>
+   docker inspect --format='{{index .RepoDigests 0}}' cimg/base:<new-tag>
+
+   # Trivy: same idea, review Aqua Security's advisories for the new tag first
+   docker pull aquasec/trivy:<new-tag>
+   docker inspect --format='{{index .RepoDigests 0}}' aquasec/trivy:<new-tag>
+   ```
+2. Update the executor's `digest` parameter default (not the tag reference
+   in an `image:` field — both executors only hold the digest there, pinned
+   via the `digest` parameter) together with the corresponding tag mentioned
+   in that parameter's own `description` — never the digest alone, since that
+   would silently decouple the human-readable tag from what actually runs.
 
 ## `src/` layout and development flow
 
@@ -76,8 +94,8 @@ Before opening a PR, run the same checks CI runs, from the repository root:
 circleci orb pack src > /tmp/orb.yml
 circleci orb validate /tmp/orb.yml --skip-update-check
 
-# Lint shell scripts backing commands
-shellcheck src/scripts/*.sh
+# Lint shell scripts backing commands (skips cleanly when none exist yet)
+if compgen -G 'src/scripts/*.sh' > /dev/null; then shellcheck src/scripts/*.sh; fi
 
 # Run BATS unit tests
 bats src/tests
@@ -121,23 +139,20 @@ We welcome [issues](https://github.com/hideokamoto/orb-circleci-configurations/i
 
 ### Development Orbs
 
-Prerequisites:
+`.circleci/test-deploy.yml` already publishes a [Development orb](https://circleci.com/docs/orb-concepts/#development-orbs)
+on every non-tag build (`pub_type: dev`, requiring `orb-tools/pack` and all
+test jobs, using the `circleci` context) — no changes are needed to try an
+in-progress change before a release:
 
-- An initial sevmer deployment must be performed in order for Development orbs to be published and seen in the [Orb Registry](https://circleci.com/developer/orbs).
+- **Every branch** publishes `hideokamoto/configurations@dev:<commit-SHA1>`.
+  Use this to try a specific commit or an open PR from another repository.
+- **Only `main`** also moves `hideokamoto/configurations@dev:alpha`, so
+  `dev:alpha` always means "latest reviewed `main`" and a PR build can never
+  change what `dev:alpha` consumers run.
 
-A [Development orb](https://circleci.com/docs/orb-concepts/#development-orbs) can be created to help with rapid development or testing. To create a Development orb, change the `orb-tools/publish` job in `test-deploy.yml` to be the following:
-
-```yaml
-- orb-tools/publish:
-    orb_name: hideokamoto/configurations
-    vcs_type: << pipeline.project.type >>
-    pub_type: dev
-    # Ensure this job requires all test jobs and the pack job.
-    requires:
-      - orb-tools/pack
-      - command-test
-    context: orb-publishing
-    filters: *filters
-```
-
-The job output will contain a link to the Development orb Registry page. The parameters `enable_pr_comment` and `github_token` can be set to add the relevant publishing information onto a pull request. Please refer to the [orb-tools/publish](https://circleci.com/developer/orbs/orb/circleci/orb-tools#jobs-publish) documentation for more information and options.
+Dev orbs expire 90 days after their last publish, so long-lived pipelines
+should not depend on a dev label. The job output contains a link to the
+Development orb Registry page. See
+[orb-tools/publish](https://circleci.com/developer/orbs/orb/circleci/orb-tools#jobs-publish)
+for the full set of parameters (e.g. `enable_pr_comment`, `github_token`) if
+you want to adapt this for a different repository.
