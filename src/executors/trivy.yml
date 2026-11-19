@@ -20,10 +20,10 @@ resource_class: <<parameters.resource_class>>
 parameters:
   digest:
     type: string
-    default: "sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969"
+    default: "sha256:af6acf9a6b85dfe389a1941505c0ce9efef52a4719635e1a962f022a3d855daa"
     description: >
       The aquasec/trivy image digest to pin, in "sha256:<hex>" form.
-      Corresponds to tag 0.74.0. When updating, check Aqua Security's
+      Corresponds to tag 0.75.0. When updating, check Aqua Security's
       advisories first, then update the tag and digest together using
       `docker inspect --format='{{index .RepoDigests 0}}' aquasec/trivy:<version>`.
   resource_class:
