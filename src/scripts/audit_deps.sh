@@ -44,6 +44,16 @@ detect_pm() {
 }
 
 DEP_AUDIT_LEVEL="${DEP_AUDIT_LEVEL:-high}"
+
+# Clear any DEP_AUDIT_RESULT left by an earlier invocation in this same job
+# before any precondition check or early exit below. BASH_ENV only appends,
+# so without this a stale 'failed' from a prior call could make
+# chunk_audit_fix.sh act on this call even though it exited early (e.g. for
+# a missing lockfile) and never actually ran an audit this time.
+if [[ -n "${BASH_ENV:-}" ]]; then
+  echo "export DEP_AUDIT_RESULT=''" >>"$BASH_ENV"
+fi
+
 DEP_AUDIT_PM="${DEP_AUDIT_PM_OVERRIDE:-}"
 if [[ -z "$DEP_AUDIT_PM" || "$DEP_AUDIT_PM" == "auto" ]]; then
   DEP_AUDIT_PM="$(detect_pm)" || {

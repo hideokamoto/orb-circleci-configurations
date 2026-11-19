@@ -139,23 +139,12 @@ We welcome [issues](https://github.com/hideokamoto/orb-circleci-configurations/i
 
 ### Development Orbs
 
-Prerequisites:
-
-- An initial sevmer deployment must be performed in order for Development orbs to be published and seen in the [Orb Registry](https://circleci.com/developer/orbs).
-
-A [Development orb](https://circleci.com/docs/orb-concepts/#development-orbs) can be created to help with rapid development or testing. To create a Development orb, change the `orb-tools/publish` job in `test-deploy.yml` to be the following:
-
-```yaml
-- orb-tools/publish:
-    orb_name: hideokamoto/configurations
-    vcs_type: << pipeline.project.type >>
-    pub_type: dev
-    # Ensure this job requires all test jobs and the pack job.
-    requires:
-      - orb-tools/pack
-      - command-test
-    context: orb-publishing
-    filters: *filters
-```
-
-The job output will contain a link to the Development orb Registry page. The parameters `enable_pr_comment` and `github_token` can be set to add the relevant publishing information onto a pull request. Please refer to the [orb-tools/publish](https://circleci.com/developer/orbs/orb/circleci/orb-tools#jobs-publish) documentation for more information and options.
+`.circleci/test-deploy.yml` already publishes a [Development orb](https://circleci.com/docs/orb-concepts/#development-orbs)
+(`hideokamoto/configurations@dev:alpha`) on every non-tag build via its own
+`orb-tools/publish` job (`pub_type: dev`, requiring `orb-tools/pack` and all
+test jobs, using the `circleci` context) — no changes are needed to try an
+in-progress change before cutting a semver release. The job output contains
+a link to the Development orb Registry page. See
+[orb-tools/publish](https://circleci.com/developer/orbs/orb/circleci/orb-tools#jobs-publish)
+for the full set of parameters (e.g. `enable_pr_comment`, `github_token`) if
+you want to adapt this for a different repository.
