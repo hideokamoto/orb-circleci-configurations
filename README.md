@@ -140,11 +140,14 @@ We welcome [issues](https://github.com/hideokamoto/orb-circleci-configurations/i
 ### Development Orbs
 
 `.circleci/test-deploy.yml` already publishes a [Development orb](https://circleci.com/docs/orb-concepts/#development-orbs)
-(`hideokamoto/configurations@dev:alpha`) on every non-tag build via its own
-`orb-tools/publish` job (`pub_type: dev`, requiring `orb-tools/pack` and all
-test jobs, using the `circleci` context) — no changes are needed to try an
-in-progress change before cutting a semver release. The job output contains
-a link to the Development orb Registry page. See
+on every non-tag build via its own `orb-tools/publish` job (`pub_type: dev`,
+requiring `orb-tools/pack` and all test jobs, using the `circleci` context) —
+no changes are needed to try an in-progress change before cutting a semver
+release. That job publishes both `hideokamoto/configurations@dev:alpha` and
+a `dev:<commit-SHA1>` tag; `dev:alpha` is overwritten by whichever non-tag
+build runs next, so to try a *specific* commit's change (rather than
+whatever is currently latest), use its `dev:<SHA1>` tag instead. The job
+output contains a link to the Development orb Registry page. See
 [orb-tools/publish](https://circleci.com/developer/orbs/orb/circleci/orb-tools#jobs-publish)
 for the full set of parameters (e.g. `enable_pr_comment`, `github_token`) if
 you want to adapt this for a different repository.
