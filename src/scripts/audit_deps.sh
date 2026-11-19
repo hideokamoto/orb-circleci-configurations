@@ -20,8 +20,11 @@ detect_pm() {
   elif [[ -f yarn.lock ]]; then
     echo yarn
   elif [[ -f package.json ]]; then
-    # No lockfile at all: assume npm, the most common case.
-    echo npm
+    # package.json present but no lockfile. `npm audit` requires
+    # package-lock.json/npm-shrinkwrap.json and exits ENOLOCK without one,
+    # a failure indistinguishable from a real vulnerability — so this is
+    # reported as its own exit code rather than silently assumed to be npm.
+    return 2
   else
     return 1
   fi
@@ -30,10 +33,16 @@ detect_pm() {
 DEP_AUDIT_LEVEL="${DEP_AUDIT_LEVEL:-high}"
 DEP_AUDIT_PM="${DEP_AUDIT_PM_OVERRIDE:-}"
 if [[ -z "$DEP_AUDIT_PM" || "$DEP_AUDIT_PM" == "auto" ]]; then
-  DEP_AUDIT_PM="$(detect_pm)" || {
+  pm_output="$(detect_pm)"
+  pm_status=$?
+  if [[ $pm_status -eq 2 ]]; then
+    echo "[dependency-audit] package.json found but no package-lock.json or npm-shrinkwrap.json; npm audit requires a lockfile, so generate or commit one before auditing"
+    exit 2
+  elif [[ $pm_status -ne 0 ]]; then
     echo "[dependency-audit] no package.json or lockfile found; cannot pick a package manager"
     exit 2
-  }
+  fi
+  DEP_AUDIT_PM="$pm_output"
 fi
 echo "[dependency-audit] package manager: $DEP_AUDIT_PM (audit level: $DEP_AUDIT_LEVEL)"
 if [[ -n "${BASH_ENV:-}" ]]; then

@@ -73,6 +73,7 @@ jobs:
       - run:
           name: chunk_audit_fix.sh skips when tokens are absent
           command: |
+            unset CIRCLE_TOKEN GITHUB_TOKEN
             bash src/scripts/chunk_audit_fix.sh
             grep -q 'CHUNK_AUDIT_FIX_SUMMARY' "$BASH_ENV"
 workflows:

@@ -13,6 +13,7 @@ parameters:
 steps:
   - run:
       name: Ask Chunk to open a fix PR
+      when: on_fail
       environment:
         DEP_AUDIT_LEVEL: <<parameters.audit_level>>
       command: <<include(scripts/chunk_audit_fix.sh)>>

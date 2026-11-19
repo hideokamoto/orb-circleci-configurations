@@ -115,13 +115,13 @@ case "${DEP_AUDIT_PM:-npm}" in
   pnpm)
     FIX_PROMPT="The scheduled dependency audit (pnpm audit --audit-level=${DEP_AUDIT_LEVEL}) failed on branch ${BRANCH}. Fix it.
 1. Run \`pnpm install --frozen-lockfile\` and \`pnpm audit --audit-level=${DEP_AUDIT_LEVEL}\` to list the advisories.
-2. Fix each with the smallest change: if the vulnerable package is a direct dependency, bump it; otherwise add an entry to \`overrides\` in pnpm-workspace.yaml mapping the vulnerable range to the patched version, following the style of the existing overrides.
+2. Fix each with the smallest change: if the vulnerable package is a direct dependency, bump it; otherwise add an override for the vulnerable range mapped to the patched version, following this repository's existing pnpm version and override configuration (the \`pnpm.overrides\` field in package.json, or the \`overrides\` field in pnpm-workspace.yaml, whichever this repo already uses) rather than introducing a new location.
 3. Regenerate pnpm-lock.yaml only with \`pnpm install\` (never edit it by hand; never use npm or yarn). The lockfile diff must touch only the packages you fixed.
 4. Verify: \`pnpm audit --audit-level=${DEP_AUDIT_LEVEL}\` exits 0, then the repo's build and test commands pass.
 5. Commit with a message starting \`${FIX_PR_TITLE_PREFIX}\` and open a pull request against ${BRANCH} titled with the same prefix, whose description lists each advisory (GHSA id, package, vulnerable and patched range), the change, and the verification output.
 Change nothing unrelated. If the audit already exits 0, make no changes and report that."
     ;;
-  *)
+  npm)
     FIX_PROMPT="The scheduled dependency audit (npm audit --audit-level=${DEP_AUDIT_LEVEL}) failed on branch ${BRANCH}. Fix it.
 1. Run \`npm ci\` and \`npm audit --audit-level=${DEP_AUDIT_LEVEL}\` to list the advisories.
 2. Fix each with the smallest change: if the vulnerable package is a direct dependency, bump it; otherwise add an entry to \`overrides\` in package.json mapping the vulnerable range to the patched version.
@@ -129,6 +129,9 @@ Change nothing unrelated. If the audit already exits 0, make no changes and repo
 4. Verify: \`npm audit --audit-level=${DEP_AUDIT_LEVEL}\` exits 0, then the repo's build and test commands pass.
 5. Commit with a message starting \`${FIX_PR_TITLE_PREFIX}\` and open a pull request against ${BRANCH} titled with the same prefix, whose description lists each advisory (GHSA id, package, vulnerable and patched range), the change, and the verification output.
 Change nothing unrelated. If the audit already exits 0, make no changes and report that."
+    ;;
+  *)
+    finish 0 "'${DEP_AUDIT_PM}' はサポート対象外のパッケージマネージャーのため Chunk を起動していません（pnpm / npm のみ対応）"
     ;;
 esac
 

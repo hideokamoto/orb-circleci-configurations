@@ -10,10 +10,16 @@ setup() {
   WORK="$(mktemp -d)"
   STUBBIN="${WORK}/bin"
   mkdir -p "$STUBBIN"
-  printf '#!/usr/bin/env bash\necho "[stub] %s $*" "$(basename "$0")"\nexit 0\n' \
-    >"${STUBBIN}/stub.sh"
-  chmod +x "${STUBBIN}/stub.sh"
-  for pm in pnpm npm; do ln -s "${STUBBIN}/stub.sh" "${STUBBIN}/${pm}"; done
+  # Each stub records its own invocation (name + args) to STUB_LOG, so tests
+  # can assert the audit command actually ran instead of grepping stdout —
+  # which also contains the script's own pre-announcement of that command.
+  export STUB_LOG="${WORK}/stub-calls.log"
+  : >"$STUB_LOG"
+  for pm in pnpm npm; do
+    printf '#!/usr/bin/env bash\necho "%s $*" >>"%s"\nexit 0\n' "$pm" "$STUB_LOG" \
+      >"${STUBBIN}/${pm}"
+    chmod +x "${STUBBIN}/${pm}"
+  done
   export PATH="${STUBBIN}:${PATH}"
   export BASH_ENV="${WORK}/bash_env"
   : >"$BASH_ENV"
@@ -32,8 +38,8 @@ teardown() {
   run bash "${REPO_ROOT}/src/scripts/audit_deps.sh"
   [ "$status" -eq 0 ]
   echo "$output" | grep -q 'package manager: pnpm'
-  echo "$output" | grep -q 'pnpm audit --audit-level=high'
   grep -q "DEP_AUDIT_PM='pnpm'" "$BASH_ENV"
+  grep -qx 'pnpm audit --audit-level=high' "$STUB_LOG"
 }
 
 @test "audit_deps.sh detects npm from package-lock.json and runs npm audit" {
@@ -42,14 +48,23 @@ teardown() {
   run bash "${REPO_ROOT}/src/scripts/audit_deps.sh"
   [ "$status" -eq 0 ]
   echo "$output" | grep -q 'package manager: npm'
-  echo "$output" | grep -q 'npm audit --audit-level=high'
   grep -q "DEP_AUDIT_PM='npm'" "$BASH_ENV"
+  grep -qx 'npm audit --audit-level=high' "$STUB_LOG"
 }
 
 @test "audit_deps.sh fails when nothing identifies a package manager" {
   run bash "${REPO_ROOT}/src/scripts/audit_deps.sh"
   [ "$status" -eq 2 ]
   echo "$output" | grep -q 'cannot pick a package manager'
+  [ ! -s "$STUB_LOG" ]
+}
+
+@test "audit_deps.sh fails explicitly when package.json has no lockfile" {
+  printf '{"name":"fixture"}\n' >package.json
+  run bash "${REPO_ROOT}/src/scripts/audit_deps.sh"
+  [ "$status" -eq 2 ]
+  echo "$output" | grep -q 'requires a lockfile'
+  [ ! -s "$STUB_LOG" ]
 }
 
 @test "chunk_audit_fix.sh skips cleanly when CIRCLE_TOKEN is unset" {
