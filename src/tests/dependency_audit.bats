@@ -67,9 +67,27 @@ teardown() {
   [ ! -s "$STUB_LOG" ]
 }
 
+@test "audit_deps.sh fails explicitly when DEP_AUDIT_PM_OVERRIDE=npm has no lockfile" {
+  export DEP_AUDIT_PM_OVERRIDE=npm
+  printf '{"name":"fixture"}\n' >package.json
+  run bash "${REPO_ROOT}/src/scripts/audit_deps.sh"
+  [ "$status" -eq 2 ]
+  echo "$output" | grep -q 'requires a lockfile'
+  [ ! -s "$STUB_LOG" ]
+}
+
 @test "chunk_audit_fix.sh skips cleanly when CIRCLE_TOKEN is unset" {
   run bash "${REPO_ROOT}/src/scripts/chunk_audit_fix.sh"
   [ "$status" -eq 0 ]
   echo "$output" | grep -q 'CIRCLE_TOKEN'
+  grep -q 'CHUNK_AUDIT_FIX_SUMMARY' "$BASH_ENV"
+}
+
+@test "chunk_audit_fix.sh skips cleanly when DEP_AUDIT_PM is unset" {
+  export CIRCLE_TOKEN=dummy GITHUB_TOKEN=dummy
+  unset DEP_AUDIT_PM
+  run bash "${REPO_ROOT}/src/scripts/chunk_audit_fix.sh"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'DEP_AUDIT_PM'
   grep -q 'CHUNK_AUDIT_FIX_SUMMARY' "$BASH_ENV"
 }

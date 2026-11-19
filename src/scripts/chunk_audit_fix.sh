@@ -65,6 +65,15 @@ for key in CIRCLE_TOKEN GITHUB_TOKEN; do
 done
 command -v jq >/dev/null 2>&1 || finish 0 "jq が無いため Chunk を起動していません"
 
+# audit_deps.sh exits before exporting DEP_AUDIT_PM when it could not
+# identify a package manager at all (no package.json or lockfile). Treat
+# that the same as an unsupported package manager rather than defaulting
+# to npm, which would send Chunk npm-flavored fix instructions for a
+# failure that was never actually an npm audit.
+if [[ -z "${DEP_AUDIT_PM:-}" ]]; then
+  finish 0 "DEP_AUDIT_PM が設定されていない（パッケージマネージャーを判定できなかった）ため Chunk を起動していません"
+fi
+
 BRANCH="${CIRCLE_BRANCH:-main}"
 OWNER="${CIRCLE_PROJECT_USERNAME:?CIRCLE_PROJECT_USERNAME is not set}"
 REPO_NAME="${CIRCLE_PROJECT_REPONAME:?CIRCLE_PROJECT_REPONAME is not set}"
@@ -111,7 +120,8 @@ if [[ -z "$DEFINITION_ID" ]]; then
 fi
 
 # ---- Build the fix prompt ---------------------------------------------------
-case "${DEP_AUDIT_PM:-npm}" in
+# DEP_AUDIT_PM is guaranteed non-empty here (checked above).
+case "$DEP_AUDIT_PM" in
   pnpm)
     FIX_PROMPT="The scheduled dependency audit (pnpm audit --audit-level=${DEP_AUDIT_LEVEL}) failed on branch ${BRANCH}. Fix it.
 1. Run \`pnpm install --frozen-lockfile\` and \`pnpm audit --audit-level=${DEP_AUDIT_LEVEL}\` to list the advisories.

@@ -13,18 +13,16 @@ set -uo pipefail
 detect_pm() {
   if [[ -f pnpm-lock.yaml || -f pnpm-workspace.yaml ]]; then
     echo pnpm
-  elif [[ -f package-lock.json || -f npm-shrinkwrap.json ]]; then
+  elif [[ -f package-lock.json || -f npm-shrinkwrap.json || -f package.json ]]; then
+    # A lockfile-less package.json is still provisionally "npm" here; the
+    # npm case below is the single place that enforces a lockfile actually
+    # exists, so the same check applies whether npm was auto-detected or
+    # forced via DEP_AUDIT_PM_OVERRIDE.
     echo npm
   elif [[ -f bun.lock || -f bun.lockb ]]; then
     echo bun
   elif [[ -f yarn.lock ]]; then
     echo yarn
-  elif [[ -f package.json ]]; then
-    # package.json present but no lockfile. `npm audit` requires
-    # package-lock.json/npm-shrinkwrap.json and exits ENOLOCK without one,
-    # a failure indistinguishable from a real vulnerability — so this is
-    # reported as its own exit code rather than silently assumed to be npm.
-    return 2
   else
     return 1
   fi
@@ -33,16 +31,10 @@ detect_pm() {
 DEP_AUDIT_LEVEL="${DEP_AUDIT_LEVEL:-high}"
 DEP_AUDIT_PM="${DEP_AUDIT_PM_OVERRIDE:-}"
 if [[ -z "$DEP_AUDIT_PM" || "$DEP_AUDIT_PM" == "auto" ]]; then
-  pm_output="$(detect_pm)"
-  pm_status=$?
-  if [[ $pm_status -eq 2 ]]; then
-    echo "[dependency-audit] package.json found but no package-lock.json or npm-shrinkwrap.json; npm audit requires a lockfile, so generate or commit one before auditing"
-    exit 2
-  elif [[ $pm_status -ne 0 ]]; then
+  DEP_AUDIT_PM="$(detect_pm)" || {
     echo "[dependency-audit] no package.json or lockfile found; cannot pick a package manager"
     exit 2
-  fi
-  DEP_AUDIT_PM="$pm_output"
+  }
 fi
 echo "[dependency-audit] package manager: $DEP_AUDIT_PM (audit level: $DEP_AUDIT_LEVEL)"
 if [[ -n "${BASH_ENV:-}" ]]; then
@@ -62,6 +54,15 @@ case "$DEP_AUDIT_PM" in
     AUDIT_CMD=(pnpm audit --audit-level="$DEP_AUDIT_LEVEL")
     ;;
   npm)
+    # `npm audit` requires package-lock.json/npm-shrinkwrap.json and exits
+    # ENOLOCK without one, a failure indistinguishable from a real
+    # vulnerability. Check explicitly — for both the auto-detected case and
+    # DEP_AUDIT_PM_OVERRIDE=npm — so a missing lockfile is reported as its
+    # own exit code instead of masquerading as an audit failure.
+    if [[ ! -f package-lock.json && ! -f npm-shrinkwrap.json ]]; then
+      echo "[dependency-audit] npm audit requires a lockfile (package-lock.json or npm-shrinkwrap.json); none found, so generate or commit one before auditing"
+      exit 2
+    fi
     AUDIT_CMD=(npm audit --audit-level="$DEP_AUDIT_LEVEL")
     ;;
   *)
