@@ -76,6 +76,26 @@ teardown() {
   [ ! -s "$STUB_LOG" ]
 }
 
+@test "audit_deps.sh detects yarn from yarn.lock even with a package.json present, and refuses to audit it" {
+  printf '{"name":"fixture"}\n' >package.json
+  touch yarn.lock
+  run bash "${REPO_ROOT}/src/scripts/audit_deps.sh"
+  [ "$status" -eq 2 ]
+  echo "$output" | grep -q 'package manager: yarn'
+  echo "$output" | grep -q 'is not supported'
+  [ ! -s "$STUB_LOG" ]
+}
+
+@test "audit_deps.sh detects bun from bun.lock even with a package.json present, and refuses to audit it" {
+  printf '{"name":"fixture"}\n' >package.json
+  touch bun.lock
+  run bash "${REPO_ROOT}/src/scripts/audit_deps.sh"
+  [ "$status" -eq 2 ]
+  echo "$output" | grep -q 'package manager: bun'
+  echo "$output" | grep -q 'is not supported'
+  [ ! -s "$STUB_LOG" ]
+}
+
 @test "chunk_audit_fix.sh skips cleanly when CIRCLE_TOKEN is unset" {
   run bash "${REPO_ROOT}/src/scripts/chunk_audit_fix.sh"
   [ "$status" -eq 0 ]
