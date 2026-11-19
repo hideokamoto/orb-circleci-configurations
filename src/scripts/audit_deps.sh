@@ -103,8 +103,12 @@ case "$DEP_AUDIT_PM" in
 esac
 
 echo "[dependency-audit] running: ${AUDIT_CMD[*]}"
-"${AUDIT_CMD[@]}"
-AUDIT_STATUS=$?
+# CircleCI executes each `run` step under `bash -eo pipefail`, so a failing
+# audit would kill the script right here before DEP_AUDIT_RESULT reaches
+# BASH_ENV. `||` exempts the command from `set -e` and still captures the
+# exit status.
+AUDIT_STATUS=0
+"${AUDIT_CMD[@]}" || AUDIT_STATUS=$?
 
 if [[ -n "${BASH_ENV:-}" ]]; then
   if [[ "$AUDIT_STATUS" -eq 0 ]]; then

@@ -63,6 +63,17 @@ teardown() {
   grep -q "DEP_AUDIT_RESULT='failed'" "$BASH_ENV"
 }
 
+@test "audit_deps.sh exports DEP_AUDIT_RESULT='failed' under bash -eo pipefail (CircleCI run semantics)" {
+  # Regression: CircleCI `run` steps use `bash -eo pipefail`, where a failing
+  # audit must not kill the script before DEP_AUDIT_RESULT reaches BASH_ENV.
+  printf '{"name":"fixture"}\n' >package.json
+  touch package-lock.json
+  printf '#!/usr/bin/env bash\necho "npm $*" >>"%s"\nexit 1\n' "$STUB_LOG" >"${STUBBIN}/npm"
+  run bash -eo pipefail "${REPO_ROOT}/src/scripts/audit_deps.sh"
+  [ "$status" -eq 1 ]
+  grep -q "DEP_AUDIT_RESULT='failed'" "$BASH_ENV"
+}
+
 @test "audit_deps.sh fails when nothing identifies a package manager" {
   run bash "${REPO_ROOT}/src/scripts/audit_deps.sh"
   [ "$status" -eq 2 ]
@@ -120,6 +131,32 @@ teardown() {
   [ "$status" -eq 0 ]
   echo "$output" | grep -q 'package manager: npm'
   grep -qx 'npm audit --audit-level=high' "$STUB_LOG"
+}
+
+@test "chunk_audit_fix.sh reaches the Chunk trigger under bash -eo pipefail (CircleCI run semantics)" {
+  # Regression: `[[ cond ]] && cmd` lists in the open-PR pagination loop die
+  # under `bash -eo pipefail` (CircleCI `run` semantics) when the condition
+  # fails. A stubbed curl keeps this offline: http() reads the last line as
+  # the HTTP status and the rest as the body.
+  export CIRCLE_TOKEN=dummy GITHUB_TOKEN=dummy
+  export DEP_AUDIT_PM=npm DEP_AUDIT_RESULT=failed
+  export CIRCLE_BRANCH=main CIRCLE_PROJECT_USERNAME=hideokamoto CIRCLE_PROJECT_REPONAME=fixture
+  cat >"${STUBBIN}/curl" <<'EOF'
+#!/usr/bin/env bash
+url="${@: -1}"
+case "$url" in
+  *api.github.com/repos/*/pulls*)            printf '[]\n200' ;;
+  *api/v2/project/gh/*)                      printf '{"id":"p1","organization_id":"o1"}\n200' ;;
+  *api/v2/projects/*/pipeline-definitions)   printf '{"items":[{"id":"d1","name":"chunk-task-pipeline"}]}\n200' ;;
+  *api/v2/agents/*/runs)                     printf '{"runId":"run-1"}\n202' ;;
+  *)                                         printf '{}\n404' ;;
+esac
+EOF
+  chmod +x "${STUBBIN}/curl"
+  run bash -eo pipefail "${REPO_ROOT}/src/scripts/chunk_audit_fix.sh"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'Chunk に修正 PR の作成を依頼しました'
+  grep -q 'CHUNK_AUDIT_FIX_SUMMARY' "$BASH_ENV"
 }
 
 @test "chunk_audit_fix.sh skips cleanly when CIRCLE_TOKEN is unset" {

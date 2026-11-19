@@ -106,8 +106,15 @@ while :; do
   fi
   prs="$(jq -r --arg a "$FIX_PR_AUTHOR" --arg p "$FIX_PR_TITLE_PREFIX" \
     '.[] | select(.user.login == $a and (.title | startswith($p))) | .html_url' <<<"$HTTP_BODY")"
-  [[ -n "$prs" ]] && open_fix_prs+=$'\n'"$prs"
-  [[ "$(jq 'length' <<<"$HTTP_BODY")" -lt 100 ]] && break
+  # `if` blocks, not `[[ ]] &&` lists: CircleCI runs each `run` step under
+  # `bash -eo pipefail`, and a failed `[[ ]]` left side of `&&` exits the
+  # shell before later pages or the summary can run.
+  if [[ -n "$prs" ]]; then
+    open_fix_prs+=$'\n'"$prs"
+  fi
+  if [[ "$(jq 'length' <<<"$HTTP_BODY")" -lt 100 ]]; then
+    break
+  fi
   page=$((page + 1))
 done
 open_fix_prs="$(grep -v '^$' <<<"$open_fix_prs" || true)"
