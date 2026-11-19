@@ -46,6 +46,7 @@ the map, not the spec.
 | executor | `trivy` | Digest-pinned `aquasec/trivy` image for SBOM generation and vulnerability scanning. |
 | command | `audit_deps` | Detects the checkout's package manager (pnpm/npm) and runs its security audit. |
 | command | `chunk_audit_fix` | Asks CircleCI's Chunk agent to open a `fix(deps):` PR after a failed dependency audit. |
+| command | `npm_publish_oidc` | Publishes an npm package via npm Trusted Publishing (OIDC), without a long-lived npm token. |
 | job | `dependency_audit` | Runs `audit_deps`, then on failure `chunk_audit_fix` and a Slack notification. |
 
 Both executors pin their Docker image by digest rather than by a mutable tag
