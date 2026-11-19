@@ -44,6 +44,20 @@ if [[ -z "$DEP_AUDIT_PM" || "$DEP_AUDIT_PM" == "auto" ]]; then
     exit 2
   }
 fi
+
+# `npm audit` requires package-lock.json/npm-shrinkwrap.json and exits
+# ENOLOCK without one, a failure indistinguishable from a real
+# vulnerability. Check explicitly — for both the auto-detected case and
+# DEP_AUDIT_PM_OVERRIDE=npm — *before* exporting DEP_AUDIT_PM: a later
+# on_fail step (chunk_audit_fix.sh) only skips Chunk when DEP_AUDIT_PM
+# never made it into BASH_ENV, so this failure must exit before that
+# export or Chunk would be asked to fix a precondition gap as if it were
+# a real npm vulnerability.
+if [[ "$DEP_AUDIT_PM" == npm && ! -f package-lock.json && ! -f npm-shrinkwrap.json ]]; then
+  echo "[dependency-audit] npm audit requires a lockfile (package-lock.json or npm-shrinkwrap.json); none found, so generate or commit one before auditing"
+  exit 2
+fi
+
 echo "[dependency-audit] package manager: $DEP_AUDIT_PM (audit level: $DEP_AUDIT_LEVEL)"
 if [[ -n "${BASH_ENV:-}" ]]; then
   echo "export DEP_AUDIT_PM='$DEP_AUDIT_PM'" >>"$BASH_ENV"
@@ -62,15 +76,7 @@ case "$DEP_AUDIT_PM" in
     AUDIT_CMD=(pnpm audit --audit-level="$DEP_AUDIT_LEVEL")
     ;;
   npm)
-    # `npm audit` requires package-lock.json/npm-shrinkwrap.json and exits
-    # ENOLOCK without one, a failure indistinguishable from a real
-    # vulnerability. Check explicitly — for both the auto-detected case and
-    # DEP_AUDIT_PM_OVERRIDE=npm — so a missing lockfile is reported as its
-    # own exit code instead of masquerading as an audit failure.
-    if [[ ! -f package-lock.json && ! -f npm-shrinkwrap.json ]]; then
-      echo "[dependency-audit] npm audit requires a lockfile (package-lock.json or npm-shrinkwrap.json); none found, so generate or commit one before auditing"
-      exit 2
-    fi
+    # The lockfile is already confirmed to exist above.
     AUDIT_CMD=(npm audit --audit-level="$DEP_AUDIT_LEVEL")
     ;;
   *)

@@ -59,21 +59,27 @@ teardown() {
   [ ! -s "$STUB_LOG" ]
 }
 
-@test "audit_deps.sh fails explicitly when package.json has no lockfile" {
+@test "audit_deps.sh fails explicitly when package.json has no lockfile, without exporting DEP_AUDIT_PM" {
   printf '{"name":"fixture"}\n' >package.json
   run bash "${REPO_ROOT}/src/scripts/audit_deps.sh"
   [ "$status" -eq 2 ]
   echo "$output" | grep -q 'requires a lockfile'
   [ ! -s "$STUB_LOG" ]
+  # Not exporting DEP_AUDIT_PM here is what makes chunk_audit_fix.sh's own
+  # "skip when DEP_AUDIT_PM is unset" guard apply to this failure too,
+  # instead of a later on_fail step asking Chunk to fix an npm audit that
+  # never actually ran.
+  ! grep -q 'DEP_AUDIT_PM' "$BASH_ENV"
 }
 
-@test "audit_deps.sh fails explicitly when DEP_AUDIT_PM_OVERRIDE=npm has no lockfile" {
+@test "audit_deps.sh fails explicitly when DEP_AUDIT_PM_OVERRIDE=npm has no lockfile, without exporting DEP_AUDIT_PM" {
   export DEP_AUDIT_PM_OVERRIDE=npm
   printf '{"name":"fixture"}\n' >package.json
   run bash "${REPO_ROOT}/src/scripts/audit_deps.sh"
   [ "$status" -eq 2 ]
   echo "$output" | grep -q 'requires a lockfile'
   [ ! -s "$STUB_LOG" ]
+  ! grep -q 'DEP_AUDIT_PM' "$BASH_ENV"
 }
 
 @test "audit_deps.sh detects yarn from yarn.lock even with a package.json present, and refuses to audit it" {
