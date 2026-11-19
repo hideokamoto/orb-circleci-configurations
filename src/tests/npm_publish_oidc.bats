@@ -1,12 +1,11 @@
 #!/usr/bin/env bats
 # Unit tests for src/scripts/npm_publish_oidc.sh.
 #
-# The script talks to two external commands:
-#   - the CircleCI build-agent CLI, invoked by full path (CIRCLECI_CLI_PATH
-#     overrides the default /usr/bin/circleci so it can point at a stub here)
-#   - `circleci env subst`, used to interpolate parameter values; the real
-#     `circleci` CLI on PATH is used for this (it is installed in this
-#     environment and requires no network access or auth for `env subst`)
+# The script talks to the CircleCI build-agent CLI only, invoked by full path
+# (CIRCLECI_CLI_PATH overrides the default /usr/bin/circleci so it can point
+# at a stub here) for both `env subst` and `run oidc get`. The stub passes
+# `env subst` input through unchanged and records only the `run oidc get`
+# argv, so the test needs no real `circleci` binary on PATH.
 #
 # `publish_command` is exercised via a marker file rather than relying on
 # stdout parsing, so assertions about "was publish invoked" and "did the
@@ -32,8 +31,13 @@ setup() {
   STUB_CLI="${TEST_TMPDIR}/circleci-stub"
   cat > "${STUB_CLI}" <<'STUB'
 #!/usr/bin/env bash
-# Records the full argv it was called with, then prints STUB_OIDC_TOKEN
-# (possibly empty) to emulate `circleci run oidc get --claims '...'`.
+# `env subst <value>`: pass the value through unchanged.
+if [ "${1-}" = "env" ] && [ "${2-}" = "subst" ]; then
+  printf '%s' "${3-}"
+  exit 0
+fi
+# Otherwise emulate `circleci run oidc get --claims '...'`: record argv,
+# then print STUB_OIDC_TOKEN (possibly empty).
 echo "$*" > "${STUB_CLI_ARGS_FILE}"
 printf '%s' "${STUB_OIDC_TOKEN-}"
 STUB

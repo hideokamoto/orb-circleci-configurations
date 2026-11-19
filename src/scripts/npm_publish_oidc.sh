@@ -6,10 +6,10 @@ set -euo pipefail
 # Publishes an npm package using npm Trusted Publishing (OIDC) instead of a
 # long-lived npm token. Mirrors the "Publish to npm (OIDC trusted
 # publishing)" step duplicated across circleci-configurations'
-# workflows/publish/*.yaml (npm-polyrepo, npm-polyrepo-bun and
-# npm-polyrepo-release-please all share the exact step body; npm-monorepo
-# differs only in swapping `npm publish` for `pnpm changeset:publish`, which
-# is why the publish command is parameterized rather than hardcoded).
+# workflows/publish/*.yaml templates (npm-polyrepo-release-please, the
+# *-semantic-release variants and npm-monorepo). They differ mainly in the
+# publish command itself (npm-monorepo runs `pnpm changeset:publish`), which
+# is why the publish command is parameterized rather than hardcoded.
 
 # Requests a CircleCI OIDC ID token scoped to the npm registry audience and
 # runs the caller-supplied publish command with it.
@@ -17,8 +17,8 @@ set -euo pipefail
 # Arguments: none.
 # Reads (env): PARAM_AUDIENCE (OIDC "aud" claim), PARAM_PUBLISH_COMMAND (the
 #   publish command to run, e.g. "npm publish" or "pnpm changeset:publish"),
-#   CIRCLECI_CLI_PATH (optional override of the build-agent CLI path used to
-#   mint the token; defaults to /usr/bin/circleci).
+#   CIRCLECI_CLI_PATH (optional override of the build-agent CLI path used for
+#   `env subst` and to mint the token; defaults to /usr/bin/circleci).
 # Side effects: unsets NODE_AUTH_TOKEN / NPM_TOKEN in the current shell;
 #   exports NPM_ID_TOKEN for the publish command to pick up; invokes the
 #   CircleCI CLI and PARAM_PUBLISH_COMMAND as subprocesses; exits the whole
@@ -34,18 +34,17 @@ publish() {
   # under `set -u` is safe even when the variables are already undefined.
   unset NODE_AUTH_TOKEN NPM_TOKEN
 
-  local audience
-  audience="$(circleci env subst "${PARAM_AUDIENCE}")"
-
-  # `circleci` on PATH inside CircleCI-hosted images resolves to the bundled
-  # *local* CLI (used for e.g. `circleci config validate`), which shadows
-  # the build-agent CLI that actually knows how to mint OIDC tokens. `run
-  # oidc get` only exists on the build-agent binary, so it must be invoked
-  # by its full path rather than through PATH lookup. The path is
-  # overridable via CIRCLECI_CLI_PATH so BATS tests can point it at a stub
-  # instead of a real /usr/bin/circleci.
+  # Always use the build-agent CLI by full path. `circleci` on PATH is not
+  # guaranteed to exist (cimg/base does not ship one), and where it does it
+  # is a different, local CLI that shadows the build-agent binary -- the only
+  # one with `run oidc get`. `env subst` is provided by the build-agent CLI
+  # too, so both calls go through the same binary. The path is overridable
+  # via CIRCLECI_CLI_PATH so BATS tests can point it at a stub.
   local cli
   cli="${CIRCLECI_CLI_PATH:-/usr/bin/circleci}"
+
+  local audience
+  audience="$("${cli}" env subst "${PARAM_AUDIENCE}")"
 
   local npm_id_token
   npm_id_token="$("${cli}" run oidc get --claims "{\"aud\": \"${audience}\"}")"
@@ -66,7 +65,7 @@ publish() {
   # general Trusted Publishing floor is >= 11.5.1, but CircleCI-specific
   # OIDC detection was added in npm/cli PR #8925 and only ships from
   # 11.11.0 onward, so 11.11.0 is the effective floor on CircleCI
-  # (cimg/node:24.19 ships npm 11.17.0 and satisfies it out of the box).
+  # (cimg/node:24.22 ships npm 11.19.1 and satisfies it out of the box).
   # Do not append --provenance to publish_command: npm explicitly excludes
   # CircleCI (`!ciInfo.CIRCLE`) from automatic provenance generation, and
   # npm's own docs state provenance generation is not currently supported
@@ -74,7 +73,7 @@ publish() {
   # visibility (public vs restricted) is controlled by the package's own
   # publishConfig.access, not by this command.
   local cmd
-  cmd="$(circleci env subst "${PARAM_PUBLISH_COMMAND}")"
+  cmd="$("${cli}" env subst "${PARAM_PUBLISH_COMMAND}")"
   bash -c "${cmd}"
 }
 

@@ -76,14 +76,13 @@ jobs:
             unset CIRCLE_TOKEN GITHUB_TOKEN
             bash src/scripts/chunk_audit_fix.sh
             grep -q 'CHUNK_AUDIT_FIX_SUMMARY' "$BASH_ENV"
-  # Exercises npm_publish_oidc end-to-end against this project's real OIDC
-  # setup, without ever calling the real `npm publish`: publish_command is
-  # overridden to a harmless echo so no package is actually published. The
-  # OIDC token request itself is real (not stubbed) -- if this project/org
-  # has npm Trusted Publishing OIDC configured, the full happy path runs; if
-  # not, the command's own fail-fast (empty-token) path is what gets
-  # exercised instead. Either outcome is a legitimate signal for this job;
-  # the unstubbed empty-token and publish_command-substitution paths are
+  # Exercises npm_publish_oidc end-to-end with a real (unstubbed) OIDC token
+  # request, without ever calling the real `npm publish`: publish_command is
+  # overridden to a harmless echo so no package is actually published.
+  # CircleCI only mints OIDC tokens for jobs that use a context, so the
+  # workflow entry runs this job with the `circleci` context; without one the
+  # command's fail-fast path would exit 1 and block every publish job that
+  # requires this test. The empty-token and publish_command paths are
   # covered deterministically by src/tests/npm_publish_oidc.bats.
   test_npm_publish_oidc:
     executor: configurations/base_pinned
@@ -103,6 +102,7 @@ workflows:
       - test_dependency_audit:
           filters: *filters
       - test_npm_publish_oidc:
+          context: circleci
           filters: *filters
       # The orb must be re-packed for publishing, and saved to the workspace.
       - orb-tools/pack:
