@@ -145,20 +145,18 @@ fi
 case "$DEP_AUDIT_PM" in
   pnpm)
     FIX_PROMPT="The scheduled dependency audit (pnpm audit --audit-level=${DEP_AUDIT_LEVEL}) failed on branch ${BRANCH}. Fix it.
-1. Run \`pnpm install --frozen-lockfile\` and \`pnpm audit --audit-level=${DEP_AUDIT_LEVEL}\` to list the advisories.
-2. Fix each with the smallest change: if the vulnerable package is a direct dependency, bump it; otherwise add an override for the vulnerable range mapped to the patched version, following this repository's existing pnpm version and override configuration (the \`pnpm.overrides\` field in package.json, or the \`overrides\` field in pnpm-workspace.yaml, whichever this repo already uses) rather than introducing a new location.
-3. Regenerate pnpm-lock.yaml only with \`pnpm install\` (never edit it by hand; never use npm or yarn). The lockfile diff must touch only the packages you fixed.
-4. Verify: \`pnpm audit --audit-level=${DEP_AUDIT_LEVEL}\` exits 0, then the repo's build and test commands pass.
-5. Commit with a message starting \`${FIX_PR_TITLE_PREFIX}\` and open a pull request against ${BRANCH} titled with the same prefix, whose description lists each advisory (GHSA id, package, vulnerable and patched range), the change, and the verification output.
+1. Run \`pnpm install --frozen-lockfile\`, then \`pnpm audit --fix\` — it resolves most advisories mechanically. Re-run \`pnpm audit --audit-level=${DEP_AUDIT_LEVEL}\` to see what remains.
+2. For advisories pnpm could not fix: if the vulnerable package is a direct dependency, bump it; otherwise add an override for the vulnerable range mapped to the patched version, following this repository's existing pnpm version and override configuration (the \`pnpm.overrides\` field in package.json, or the \`overrides\` field in pnpm-workspace.yaml, whichever this repo already uses) rather than introducing a new location. Regenerate pnpm-lock.yaml only with \`pnpm install\` (never edit it by hand; never use npm or yarn) and keep the lockfile diff minimal — do not reformat unrelated entries.
+3. Commit with a message starting \`${FIX_PR_TITLE_PREFIX}\` and open a pull request against ${BRANCH} titled with the same prefix. Open it as soon as the audit passes. If you are running out of turns, commit whatever progress you have and open it as a draft PR instead, listing what remains — do not leave uncommitted work.
+4. In the PR description list each advisory (GHSA id, package, vulnerable and patched range), the change, and the final \`pnpm audit\` output. The PR's own CI runs the build and tests — do not spend turns on them unless a change goes beyond the manifest and lockfile.
 Change nothing unrelated. If the audit already exits 0, make no changes and report that."
     ;;
   npm)
     FIX_PROMPT="The scheduled dependency audit (npm audit --audit-level=${DEP_AUDIT_LEVEL}) failed on branch ${BRANCH}. Fix it.
-1. Run \`npm ci\` and \`npm audit --audit-level=${DEP_AUDIT_LEVEL}\` to list the advisories.
-2. Fix each with the smallest change: if the vulnerable package is a direct dependency, bump it; otherwise add an entry to \`overrides\` in package.json mapping the vulnerable range to the patched version.
-3. Regenerate package-lock.json only with \`npm install --package-lock-only\` (never edit it by hand). The lockfile diff must touch only the packages you fixed.
-4. Verify: \`npm audit --audit-level=${DEP_AUDIT_LEVEL}\` exits 0, then the repo's build and test commands pass.
-5. Commit with a message starting \`${FIX_PR_TITLE_PREFIX}\` and open a pull request against ${BRANCH} titled with the same prefix, whose description lists each advisory (GHSA id, package, vulnerable and patched range), the change, and the verification output.
+1. Run \`npm audit fix --package-lock-only\` first — it resolves most advisories mechanically. Re-run \`npm audit --audit-level=${DEP_AUDIT_LEVEL}\` to see what remains.
+2. For advisories npm could not fix: if the vulnerable package is a direct dependency, bump it; otherwise add an entry to \`overrides\` in package.json mapping the vulnerable package to the patched version (when an override conflicts with a direct dependency spec, use the direct dependency's spec as the override value). Regenerate package-lock.json only with \`npm install --package-lock-only\` (never edit it by hand) and keep the lockfile diff minimal — do not reformat unrelated entries.
+3. Commit with a message starting \`${FIX_PR_TITLE_PREFIX}\` and open a pull request against ${BRANCH} titled with the same prefix. Open it as soon as the audit passes. If you are running out of turns, commit whatever progress you have and open it as a draft PR instead, listing what remains — do not leave uncommitted work.
+4. In the PR description list each advisory (GHSA id, package, vulnerable and patched range), the change, and the final \`npm audit\` output. The PR's own CI runs the build and tests — do not spend turns on them unless a change goes beyond the manifest and lockfile.
 Change nothing unrelated. If the audit already exits 0, make no changes and report that."
     ;;
   *)
