@@ -14,10 +14,10 @@ resource_class: <<parameters.resource_class>>
 parameters:
   digest:
     type: string
-    default: "sha256:e8f07526f593ac5dee29362b7f98c6fec94c412722d6bbece731e4cc885abccb"
+    default: "sha256:64becfab2860932391d834a770033665874e287a655dbef26e38df060414a79a"
     description: >
       The cimg/base image digest to pin, in "sha256:<hex>" form. Corresponds
-      to tag cimg/base:2026.08 (a monthly snapshot). When updating, check
+      to tag cimg/base:2026.10 (a monthly snapshot). When updating, check
       https://hub.docker.com/r/cimg/base/tags for the current monthly tag and
       update the digest together with the tag reference in this description,
       so the two never drift apart.
