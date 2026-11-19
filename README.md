@@ -47,9 +47,18 @@ map, not the spec.
 
 Both executors pin their Docker image by digest rather than by a mutable tag
 (such as `:current`), so a given commit's CI behavior stays reproducible over
-time. See each executor's `description` in `src/executors/` for the update
-procedure — in short, update the tag and digest together after confirming the
-new image is safe to use.
+time. See each executor's `description` in `src/executors/` for the full
+update procedure (monthly tag check for `base_pinned`, Aqua Security advisory
+review for `trivy`); in short:
+
+1. Pull the new tag and resolve its current digest:
+   ```bash
+   docker pull cimg/base:<new-tag>   # or aquasec/trivy:<new-tag>
+   docker inspect --format='{{index .RepoDigests 0}}' cimg/base:<new-tag>
+   ```
+2. Update both the `tag` parameter default and the pinned digest in the
+   executor's `image:` field together — never the digest alone, since that
+   would silently decouple the human-readable tag from what actually runs.
 
 ## `src/` layout and development flow
 
