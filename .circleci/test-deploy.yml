@@ -49,6 +49,33 @@ jobs:
       - run:
           name: Confirm trivy resolves to a working Trivy image
           command: trivy --version
+  # Exercise the dependency_audit scripts and the audit_deps command without
+  # real credentials: a stubbed `pnpm` stands in for the package manager, and
+  # the Chunk fix script is run through its "skip without tokens" path.
+  test_dependency_audit:
+    docker:
+      - image: cimg/node:lts
+    steps:
+      - checkout
+      - run:
+          name: Prepare a stubbed pnpm fixture
+          command: |
+            mkdir -p "$HOME/stubbin"
+            printf '#!/usr/bin/env bash\necho "[stub] $0 $*"\nexit 0\n' > "$HOME/stubbin/pnpm"
+            chmod +x "$HOME/stubbin/pnpm"
+            printf 'export PATH="$HOME/stubbin:$PATH"\n' >> "$BASH_ENV"
+            printf '{"name":"fixture","packageManager":"pnpm@10.0.0"}\n' > package.json
+            touch pnpm-lock.yaml
+      # Runs src/scripts/audit_deps.sh through the packed orb: must detect
+      # pnpm from the fixture lockfile and invoke the stubbed `pnpm audit`.
+      - configurations/audit_deps:
+          audit_level: high
+      - run:
+          name: chunk_audit_fix.sh skips when tokens are absent
+          command: |
+            unset CIRCLE_TOKEN GITHUB_TOKEN
+            bash src/scripts/chunk_audit_fix.sh
+            grep -q 'CHUNK_AUDIT_FIX_SUMMARY' "$BASH_ENV"
   # Exercises with_deploy_marker end to end: plan -> RUNNING -> steps ->
   # SUCCESS against a real "orb-test" component in the "ci-validation"
   # environment. This does create a real deploy marker in this orb repo's
@@ -76,11 +103,53 @@ workflows:
           filters: *filters
       - test_trivy_executor:
           filters: *filters
+      - test_dependency_audit:
+          filters: *filters
       - test_with_deploy_marker:
           filters: *filters
       # The orb must be re-packed for publishing, and saved to the workspace.
       - orb-tools/pack:
-          filters: *release-filters
+          filters: *filters
+      # Dev orbs. dev:alpha is consumed by real pipelines, so only main may
+      # move it; every other branch publishes an immutable-per-commit
+      # dev:<SHA1> label instead, so an unreviewed PR build can never change
+      # what dev:alpha consumers run.
+      - orb-tools/publish:
+          name: publish-dev-main
+          orb_name: hideokamoto/configurations
+          vcs_type: << pipeline.project.type >>
+          pub_type: dev
+          dev_tags: dev:${CIRCLE_SHA1},dev:alpha
+          requires:
+            - orb-tools/pack
+            - test_base_pinned_executor
+            - test_trivy_executor
+            - test_dependency_audit
+            - test_with_deploy_marker
+          context: circleci
+          filters:
+            branches:
+              only: main
+            tags:
+              ignore: /.*/
+      - orb-tools/publish:
+          name: publish-dev-branch
+          orb_name: hideokamoto/configurations
+          vcs_type: << pipeline.project.type >>
+          pub_type: dev
+          dev_tags: dev:${CIRCLE_SHA1}
+          requires:
+            - orb-tools/pack
+            - test_base_pinned_executor
+            - test_trivy_executor
+            - test_dependency_audit
+            - test_with_deploy_marker
+          context: circleci
+          filters:
+            branches:
+              ignore: main
+            tags:
+              ignore: /.*/
       - orb-tools/publish:
           orb_name: hideokamoto/configurations
           vcs_type: << pipeline.project.type >>
@@ -90,6 +159,7 @@ workflows:
             - orb-tools/pack
             - test_base_pinned_executor
             - test_trivy_executor
+            - test_dependency_audit
             - test_with_deploy_marker
-          context: orb-publishing
+          context: circleci
           filters: *release-filters
