@@ -156,7 +156,8 @@ jobs:
   # dialing out. The exit-1 "webhook url unset" path is covered by BATS.
   # Runs on the trivy executor because that alpine/busybox image (root, no
   # bash) is where this command is meant to run; a cimg image would not
-  # exercise its POSIX sh or the build-agent CLI being present there. The
+  # exercise its POSIX sh, nor the absence of the circleci CLI there (so
+  # sbom_file must be a literal path, not an env-var reference). The
   # stub goes in /usr/local/bin (on PATH, writable as root) rather than via
   # $BASH_ENV, which /bin/sh never sources.
   test_send_sbom_to_port:

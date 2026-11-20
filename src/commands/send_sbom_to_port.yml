@@ -47,8 +47,10 @@ parameters:
     type: integer
     default: 60
     description: >
-      Maximum total number of seconds curl may spend on the request,
-      including retries (curl --max-time).
+      Maximum number of seconds each curl attempt may take (curl
+      --max-time). The limit applies per attempt and resets on every
+      retry, so the worst case is roughly (retries + 1) * max_time plus
+      the retry back-off.
 
 steps:
   - run:
