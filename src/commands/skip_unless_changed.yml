@@ -1,0 +1,92 @@
+description: >
+  Halt the current job (via `circleci-agent step halt`) based on which paths
+  changed between a base and a head revision, instead of running the rest of
+  the job's steps. Unifies two path-based skip guards that were duplicated
+  across circleci-configurations: deploy jobs skip a deploy when only
+  agent-skill/docs paths changed (mode: skip_if_only_matches), while the
+  AI-DLC validation job skips validation unless AI-DLC related paths changed
+  (mode: skip_unless_matches).
+
+  Fail-safe by design: whenever the base revision cannot be resolved, base
+  and head are the same commit, or the diff between them is empty, this
+  command lets the job continue rather than risk skipping something that
+  should have run. A caller that cannot afford to ever skip work by mistake
+  should prefer being wrong toward "run" over wrong toward "skip", which is
+  why every ambiguous case here falls through to continuing the job.
+
+parameters:
+  base_revision:
+    type: string
+    default: ""
+    description: >
+      The revision to diff from, typically the caller's
+      `<< pipeline.git.base_revision >>`. GitHub App-triggered pipelines
+      resolve this to an empty string, so when it is empty this command
+      falls back to the strategy in the `fallback` parameter instead of
+      skipping the check outright.
+  head_revision:
+    type: string
+    default: ""
+    description: >
+      The revision to diff to. Empty (the default) resolves to
+      `$CIRCLE_SHA1`, the commit this job is running against.
+  fallback:
+    type: enum
+    enum: ["deploy_tag", "parent_commit", "none"]
+    default: "deploy_tag"
+    description: >
+      How to resolve a base revision when `base_revision` is empty.
+      `deploy_tag` finds the most recent tag matching `deploy_tag_glob`
+      reachable from the head revision — the commit a previous successful
+      deploy tagged — and is the right choice for deploy jobs, since a
+      single missed deploy tag (e.g. skipped deploys) is still caught on
+      the next real deploy because the fallback walks back to the last
+      tagged commit. `parent_commit` resolves to `HEAD^1` and suits
+      self-validation jobs that have no equivalent "last successful run"
+      tag to anchor on; its known weakness is that it only looks one commit
+      back, so a multi-commit push where only the *last* commit avoids the
+      pattern can under-evaluate the earlier commits — acceptable when the
+      cost of a missed skip is "re-run this job once more", not "skip a
+      production deploy". `none` never falls back, so an empty
+      `base_revision` always resolves to "cannot determine base" and the
+      job continues (fail-safe).
+  mode:
+    type: enum
+    enum: ["skip_if_only_matches", "skip_unless_matches"]
+    default: "skip_if_only_matches"
+    description: >
+      `skip_if_only_matches` halts the job when every changed path matches
+      `pattern` (used to skip deploys that only touch docs/agent-skill
+      paths). `skip_unless_matches` halts the job when *no* changed path
+      matches `pattern` (used to skip validation unless related paths
+      changed). Exactly one changed path failing to match `pattern` is
+      enough to keep the job running in `skip_if_only_matches` mode; exactly
+      one changed path matching `pattern` is enough to keep it running in
+      `skip_unless_matches` mode.
+  pattern:
+    type: string
+    default: '(^\.claude/|\.md$)'
+    description: >
+      Extended regular expression (as consumed by `grep -E`) matched
+      against each changed path (one per line). The default matches the
+      deploy-job guard's "agent-skill/docs only" set: anything under
+      `.claude/` or any Markdown file.
+  deploy_tag_glob:
+    type: string
+    default: '[0-9][0-9][0-9][0-9].[0-9][0-9].[0-9][0-9]-*'
+    description: >
+      Glob passed to `git describe --tags --match` when `fallback` is
+      `deploy_tag`. The default matches the `YYYY.MM.DD-<sha7>` tags this
+      orb's `push_deploy_tag` command creates on a successful deploy.
+
+steps:
+  - run:
+      name: Skip unless changed
+      environment:
+        PARAM_BASE_REVISION: <<parameters.base_revision>>
+        PARAM_HEAD_REVISION: <<parameters.head_revision>>
+        PARAM_FALLBACK: <<parameters.fallback>>
+        PARAM_MODE: <<parameters.mode>>
+        PARAM_PATTERN: <<parameters.pattern>>
+        PARAM_DEPLOY_TAG_GLOB: <<parameters.deploy_tag_glob>>
+      command: <<include(scripts/skip_unless_changed.sh)>>
