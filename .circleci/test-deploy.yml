@@ -370,6 +370,49 @@ jobs:
             TAG="${FIXTURE_DATE}-${CIRCLE_SHA1:0:7}"
             COUNT="$(git ls-remote --tags origin | grep -c "$TAG")"
             [ "$COUNT" -eq 1 ]
+  test_cdk_synth:
+    # No checkout: this job only exercises the command against a throwaway
+    # fixture, not the orb repo itself.
+    executor:
+      name: node/default
+      tag: "22.14"
+    working_directory: /tmp/cdk-synth-fixture
+    steps:
+      - run:
+          name: Write a minimal CDK-app-shaped fixture (synth script reports CDK_DEFAULT_* env)
+          command: |
+            mkdir -p /tmp/cdk-synth-fixture
+            # CircleCI config v2.1 treats a doubled angle-bracket sequence as
+            # parameter/pipeline-value syntax, so a literal heredoc start
+            # here must be backslash-escaped, or the config fails to
+            # compile with an "Unclosed tag" error. `circleci config
+            # process` strips that escaping backslash before the shell ever
+            # sees this line, so the heredoc below still runs correctly.
+            cat > package.json \<<'PKGJSON'
+            {
+              "name": "cdk-synth-fixture",
+              "private": true,
+              "packageManager": "pnpm@10.34.9",
+              "scripts": {
+                "synth": "env | grep '^CDK_DEFAULT_' | sort > synth-output.txt"
+              }
+            }
+            PKGJSON
+      # packageManager above pins the pnpm that corepack provisions. Without
+      # it corepack fetches the newest pnpm, and pnpm 12 dropped the
+      # bin/pnpm.cjs entry point that Node 22.14's bundled corepack loads.
+      - run:
+          name: Enable pnpm via corepack
+          command: corepack enable pnpm
+      - configurations/cdk_synth:
+          pkg_manager: pnpm
+          synth_script: synth
+      - run:
+          name: Confirm the account/region placeholders were applied
+          command: |
+            cat synth-output.txt
+            grep -qx 'CDK_DEFAULT_ACCOUNT=123456789012' synth-output.txt
+            grep -qx 'CDK_DEFAULT_REGION=us-east-1' synth-output.txt
 workflows:
   test-deploy:
     jobs:
@@ -380,6 +423,8 @@ workflows:
       - test_trivy_executor:
           filters: *filters
       - test_dependency_audit:
+          filters: *filters
+      - test_cdk_synth:
           filters: *filters
       - test_push_deploy_tag:
           filters: *filters
@@ -429,6 +474,7 @@ workflows:
             - test_resolve_deploy_tag
             - test_resolve_deploy_tag_halts_without_tag
             - test_push_deploy_tag
+            - test_cdk_synth
             - test_npm_publish_oidc
           context: circleci
           filters: *filters

@@ -1,0 +1,60 @@
+description: >
+  Run `cdk synth` against a placeholder AWS account/region, so a
+  validate-style job (build the CDK app and synth its template, without
+  deploying) succeeds even without real AWS credentials. CDK_DEFAULT_ACCOUNT
+  and CDK_DEFAULT_REGION are only defaulted when unset, so a Context or
+  Project env var that already sets a real account/region takes priority
+  and is left untouched.
+
+  Migrated from the "CDK synth" step of the `validate` job in the source
+  repo's AWS CDK deploy workflows (5 occurrences across the arm64 and
+  non-arm64 variants), which all share this same placeholder-fallback
+  behavior.
+
+  Caveat carried over unchanged from the source workflow: if the CDK app
+  defines a NodejsFunction, the app's devDependencies must include esbuild.
+  With esbuild present, CDK bundles the function locally; without it, CDK
+  falls back to bundling via `docker run`, and a job with no Docker daemon
+  available (the common case for a lightweight validate job) fails with
+  "Cannot connect to the Docker daemon". Add `setup_remote_docker` to the
+  job if you cannot add esbuild as a devDependency.
+
+parameters:
+  pkg_manager:
+    type: enum
+    enum: ["pnpm", "npm", "yarn"]
+    default: "pnpm"
+    description: >
+      Package manager used to invoke the synth script, as
+      "<pkg_manager> run <synth_script>". The package manager must already
+      be installed and dependencies already installed (e.g. via
+      node/install-packages) before this command runs.
+  synth_script:
+    type: string
+    default: "synth"
+    description: >
+      Name of the package.json script that runs `cdk synth` (or an
+      equivalent synth command).
+  account_placeholder:
+    type: string
+    default: "123456789012"
+    description: >
+      Placeholder AWS account id exported as CDK_DEFAULT_ACCOUNT when that
+      variable is not already set in the environment. 123456789012 is AWS's
+      standard documentation placeholder account id.
+  region_placeholder:
+    type: string
+    default: "us-east-1"
+    description: >
+      Placeholder AWS region exported as CDK_DEFAULT_REGION when that
+      variable is not already set in the environment.
+
+steps:
+  - run:
+      name: CDK synth
+      environment:
+        PARAM_ACCOUNT_PLACEHOLDER: <<parameters.account_placeholder>>
+        PARAM_REGION_PLACEHOLDER: <<parameters.region_placeholder>>
+        PARAM_SYNTH_SCRIPT: <<parameters.synth_script>>
+        PARAM_PKG_MANAGER: <<parameters.pkg_manager>>
+      command: <<include(scripts/cdk_synth.sh)>>

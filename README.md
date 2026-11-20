@@ -56,6 +56,7 @@ the map, not the spec.
 | command | `skip_unless_changed` | Halts the job based on the paths changed between the base and head revisions, per `mode` and `pattern`: by default (`skip_if_only_matches`) it halts when every changed path matches `pattern` (e.g. docs-only changes); `skip_unless_matches` halts when no changed path matches. |
 | command | `resolve_deploy_tag` | Reads back the deploy tag pushed to a commit and exports it to `$BASH_ENV`. |
 | command | `push_deploy_tag` | Pushes a date-stamped release tag for the deployed commit (default UTC `YYYY.MM.DD-<sha7>`), skipping if it already exists. If you override `date_format` / `sha_length`, keep `skip_unless_changed`'s `deploy_tag_glob` and the `tag_regex` of `resolve_deploy_tag` / `resolve_previous_deploy_tag` in sync. |
+| command | `cdk_synth` | Runs `cdk synth` against a placeholder AWS account/region, so a validate job can synth without real AWS credentials. |
 | job | `dependency_audit` | Runs `audit_deps`, then on failure `chunk_audit_fix` and a Slack notification. |
 
 Both executors pin their Docker image by digest rather than by a mutable tag
