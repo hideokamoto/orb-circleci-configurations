@@ -103,7 +103,7 @@ teardown() {
   [ "$(wc -l < "${CURL_CALL_LOG}")" -eq 1 ]
   [ -x "${HOME}/.bun/bin/bun" ]
   [ "$("${HOME}/.bun/bin/bun" --version)" = "v1.3.14" ]
-  ! echo "$output" | grep -q "reinstalling"
+  ! echo "$output" | grep -q "reinstalling" || false
   grep -q 'export PATH="${HOME}/.bun/bin:${PATH}"' "${BASH_ENV}"
 }
 
@@ -152,7 +152,7 @@ MATCHING_BUN
   [ "$status" -eq 0 ]
 
   [ ! -s "${CURL_CALL_LOG}" ]
-  ! echo "$output" | grep -q "reinstalling"
+  ! echo "$output" | grep -q "reinstalling" || false
   [ "$("${HOME}/.bun/bin/bun" --version)" = "v1.3.14" ]
 }
 
