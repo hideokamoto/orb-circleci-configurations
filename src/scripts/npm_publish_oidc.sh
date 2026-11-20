@@ -74,7 +74,13 @@ publish() {
   # publishConfig.access, not by this command.
   local cmd
   cmd="$("${cli}" env subst "${PARAM_PUBLISH_COMMAND}")"
-  bash -c "${cmd}"
+  # The child bash re-sources $BASH_ENV on startup (non-interactive bash
+  # does), so a legacy `export NPM_TOKEN=...` an earlier step appended there
+  # would come back after the unset above. Clear the legacy token variables
+  # again inside the child, after $BASH_ENV has been read and right before
+  # the publish command runs. The command string is passed as a positional
+  # argument and evaluated there, exactly as `bash -c "${cmd}"` would parse it.
+  bash -c 'unset NODE_AUTH_TOKEN NPM_TOKEN; eval "$1"' npm_publish_oidc "${cmd}"
 }
 
 # Script entry point, run only when this file is executed directly (not

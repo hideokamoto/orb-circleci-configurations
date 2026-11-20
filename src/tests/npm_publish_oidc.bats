@@ -106,6 +106,28 @@ teardown() {
   [ -f "${MARKER_FILE}" ]
 }
 
+@test "legacy tokens re-exported via BASH_ENV do not reach publish_command" {
+  # CircleCI persists step-to-step env through $BASH_ENV, and the child bash
+  # that runs publish_command re-sources it. An earlier step's legacy token
+  # export must not come back for the publish command, while other BASH_ENV
+  # exports and NPM_ID_TOKEN must still be visible.
+  export BASH_ENV="${TEST_TMPDIR}/bash_env"
+  {
+    echo 'export NPM_TOKEN="legacy-npm-token-from-bash-env"'
+    echo 'export NODE_AUTH_TOKEN="legacy-node-auth-token-from-bash-env"'
+    echo 'export EARLIER_STEP_VALUE="kept"'
+  } > "${BASH_ENV}"
+  export STUB_OIDC_TOKEN="token-for-bash-env-check"
+  export PARAM_AUDIENCE="npm:registry.npmjs.org"
+  export PARAM_PUBLISH_COMMAND="[ -z \"\${NODE_AUTH_TOKEN-}\" ] && [ -z \"\${NPM_TOKEN-}\" ] && [ \"\${EARLIER_STEP_VALUE-}\" = kept ] && [ \"\${NPM_ID_TOKEN-}\" = token-for-bash-env-check ] && touch '${MARKER_FILE}'"
+
+  run bash "${SCRIPT}"
+  unset BASH_ENV
+
+  [ "$status" -eq 0 ]
+  [ -f "${MARKER_FILE}" ]
+}
+
 @test "publish_command is fully overridable (e.g. Changesets monorepo publish)" {
   export STUB_OIDC_TOKEN="token-for-command-override"
   export PARAM_AUDIENCE="npm:registry.npmjs.org"
