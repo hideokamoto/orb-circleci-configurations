@@ -25,11 +25,11 @@ CIRCLECI_CLI="${CIRCLECI_CLI:-/usr/bin/circleci}"
 #   PARAM_COMMIT resolves to an empty string, and $CIRCLECI_CLI for the
 #   `circleci` binary to run `env subst` through).
 # Returns: 0 on both a resolved tag and a missing tag with
-#   PARAM_HALT_IF_MISSING="false"; 1 on a configuration/tooling error
+#   PARAM_HALT_IF_MISSING false ("0" or "false"); 1 on a configuration/tooling error
 #   (PARAM_OUTPUT_ENV is not a valid Bash identifier, PARAM_TAG_REGEX is
 #   not a valid extended regular expression, or `git tag --points-at`
 #   itself fails) — these are never treated as "no tag found"; does not
-#   return when PARAM_HALT_IF_MISSING="true" and no tag matches, since
+#   return when PARAM_HALT_IF_MISSING is true ("1" or "true") and no tag matches, since
 #   `circleci-agent step halt` ends the step there.
 # Side effects: runs `git fetch --tags --force origin` against the current
 #   working directory's repo; on a match, appends
@@ -98,9 +98,15 @@ resolve_deploy_tag() {
 
     if [ -z "$tag" ]; then
         echo "No tag matching '${tag_regex}' found on commit ${commit} (deploy was likely skipped)."
-        if [ "$halt_if_missing" = "true" ]; then
-            circleci-agent step halt
-        fi
+        # CircleCI renders a boolean parameter placed in `environment:` as
+        # "1"/"0" (the official circleci/aws-cli orb tests its *_BOOL_* vars
+        # with `-eq 1`), while direct/test invocations pass "true"/"false".
+        # Accept both spellings of true; anything else means continue.
+        case "$halt_if_missing" in
+            1 | true)
+                circleci-agent step halt
+                ;;
+        esac
         return 0
     fi
 

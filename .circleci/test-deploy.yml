@@ -98,6 +98,10 @@ jobs:
             echo "export RESOLVE_TAG_TEST_SHA=\"$(git rev-parse HEAD)\"" >> "$BASH_ENV"
       - configurations/resolve_deploy_tag:
           commit: "$RESOLVE_TAG_TEST_SHA"
+          # Do not halt on a miss here: a regression that fails to pick the
+          # fixture tag must reach the assertion below and fail, instead of
+          # ending the job successfully via step halt.
+          halt_if_missing: false
       - run:
           name: Assert RELEASE_TAG was exported with the expected value
           command: |
@@ -106,6 +110,35 @@ jobs:
               exit 1
             fi
             echo "RELEASE_TAG resolved correctly: $RELEASE_TAG"
+  # Exercises the default halt_if_missing (true) on a commit with no deploy
+  # tag, through the real orb parameter pipeline: CircleCI decides how the
+  # boolean is rendered into the step's environment, which unit tests cannot
+  # reproduce. If the command does not halt, the next step runs and fails.
+  test_resolve_deploy_tag_halts_without_tag:
+    executor: configurations/base_pinned
+    working_directory: /tmp/resolve-deploy-tag-missing-fixture
+    steps:
+      - run:
+          name: Build a local git fixture repo with no tag on HEAD
+          command: |
+            REMOTE_DIR="$(mktemp -d)"
+            git init --quiet --bare "$REMOTE_DIR"
+            git init --quiet .
+            git config user.email "test@example.com"
+            git config user.name "Test"
+            git remote add origin "$REMOTE_DIR"
+            echo hello > file.txt
+            git add file.txt
+            git commit --quiet -m "test commit"
+            git push --quiet origin HEAD:main
+            echo "export RESOLVE_TAG_TEST_SHA=\"$(git rev-parse HEAD)\"" >> "$BASH_ENV"
+      - configurations/resolve_deploy_tag:
+          commit: "$RESOLVE_TAG_TEST_SHA"
+      - run:
+          name: Fail if the missing tag did not halt the job
+          command: |
+            echo "resolve_deploy_tag did not halt although no tag matched (halt_if_missing defaults to true)"
+            exit 1
 workflows:
   test-deploy:
     jobs:
@@ -118,6 +151,8 @@ workflows:
       - test_dependency_audit:
           filters: *filters
       - test_resolve_deploy_tag:
+          filters: *filters
+      - test_resolve_deploy_tag_halts_without_tag:
           filters: *filters
       # The orb must be re-packed for publishing, and saved to the workspace.
       - orb-tools/pack:
@@ -138,5 +173,6 @@ workflows:
             - test_trivy_executor
             - test_dependency_audit
             - test_resolve_deploy_tag
+            - test_resolve_deploy_tag_halts_without_tag
           context: circleci
           filters: *filters

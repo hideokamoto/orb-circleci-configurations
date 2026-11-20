@@ -109,6 +109,25 @@ teardown() {
     ! grep -q "RELEASE_TAG" "$BASH_ENV" || false
 }
 
+@test "halts when halt_if_missing is \"1\" (how CircleCI renders a true boolean in environment)" {
+    export PARAM_HALT_IF_MISSING="1"
+
+    run bash "$SCRIPT"
+
+    [ "$status" -eq 0 ]
+    [ -f "$HALT_LOG" ]
+    grep -q "step halt" "$HALT_LOG"
+}
+
+@test "does not halt when halt_if_missing is \"0\" (how CircleCI renders a false boolean in environment)" {
+    export PARAM_HALT_IF_MISSING="0"
+
+    run bash "$SCRIPT"
+
+    [ "$status" -eq 0 ]
+    [ ! -f "$HALT_LOG" ]
+}
+
 @test "returns the alphabetically-first regex-matching tag when several match the same commit" {
     git tag 2026.09.03-bbbbbbb
     git tag 2026.09.03-aaaaaaa
