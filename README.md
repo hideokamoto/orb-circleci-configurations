@@ -49,6 +49,7 @@ the map, not the spec.
 | command | `install_cdkd` | Installs a version-pinned cdkd CLI. |
 | command | `create_github_release` | Idempotently creates a GitHub Release for the deploy tag resolved by `resolve_deploy_tag`. |
 | command | `resolve_previous_deploy_tag` | Resolves the release tag before the current one from the commit graph. |
+| command | `generate_release_notes_from_deploy_diff` | Installs the standalone CircleCI CLI (sha256-pinned), then generates release notes from CircleCI Deploy Diff Summaries, falling back to `gh release create --generate-notes`. |
 | command | `npm_publish_oidc` | Publishes an npm package via npm Trusted Publishing (OIDC), without a long-lived npm token. |
 | job | `dependency_audit` | Runs `audit_deps`, then on failure `chunk_audit_fix` and a Slack notification. |
 
