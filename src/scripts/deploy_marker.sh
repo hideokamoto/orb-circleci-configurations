@@ -171,7 +171,7 @@ deploy_marker_plan() {
 #                              PARAM_STATUS=FAILED, or ""
 #                              (falls back to $FAILURE_REASON, then to the
 #                              literal "Deployment failed")
-#     PARAM_TOLERATE_MISSING - "true" to swallow a failing CLI call whose
+#     PARAM_TOLERATE_MISSING - "1" or "true" to swallow a failing CLI call whose
 #                               output indicates the release marker is
 #                               missing or was already resolved (see
 #                               marker_missing_or_resolved); any other
@@ -187,10 +187,10 @@ deploy_marker_plan() {
 #   build-agent CLI path.
 # Returns:
 #   0 if the underlying "$CIRCLECI_CLI run release update ..." call
-#   succeeds, or if it fails, PARAM_TOLERATE_MISSING is "true", and the
+#   succeeds, or if it fails, PARAM_TOLERATE_MISSING is "1"/"true", and the
 #   call's output indicates the marker is missing or already resolved (see
 #   marker_missing_or_resolved) -- that failure is logged and swallowed.
-#   1 if the call fails and either PARAM_TOLERATE_MISSING is not "true", or
+#   1 if the call fails and either PARAM_TOLERATE_MISSING is not "1"/"true", or
 #   the output does not match that missing/already-resolved pattern (an
 #   unrelated failure -- authentication, connectivity, a malformed
 #   request, etc. -- is never swallowed, even with tolerate_missing set).
@@ -257,10 +257,17 @@ deploy_marker_update() {
   # Any other failure (auth, connectivity, a malformed request, ...) must
   # still propagate: swallowing those unconditionally would hide real
   # problems behind a misleading "nothing to reconcile" success.
-  if [ "${PARAM_TOLERATE_MISSING:-false}" = "true" ] && marker_missing_or_resolved "$cli_output"; then
-    echo "marker already resolved or not found -- nothing to reconcile"
-    return 0
-  fi
+  # CircleCI renders a boolean parameter placed in `environment:` as "1"/"0"
+  # (the official circleci/aws-cli orb tests its *_BOOL_* vars with
+  # `-eq 1`), while direct/test invocations pass "true"/"false".
+  case "${PARAM_TOLERATE_MISSING:-false}" in
+    1 | true)
+      if marker_missing_or_resolved "$cli_output"; then
+        echo "marker already resolved or not found -- nothing to reconcile"
+        return 0
+      fi
+      ;;
+  esac
 
   return 1
 }

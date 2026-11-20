@@ -377,6 +377,19 @@ teardown() {
   echo "$output" | grep -q "already resolved or not found"
 }
 
+@test "deploy_marker_update tolerates a 'not found' CLI failure when tolerate_missing is \"1\" (how CircleCI renders a true boolean in environment)" {
+  export PARAM_ACTION="update"
+  export PARAM_COMPONENT_NAME="svc"
+  export PARAM_STATUS="CANCELED"
+  export PARAM_TOLERATE_MISSING="1"
+  export STUB_EXIT_CODE="1"
+  export STUB_OUTPUT="Error: release 'svc-wf-123' not found"
+
+  run deploy_marker_update
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "already resolved or not found"
+}
+
 @test "deploy_marker_update tolerates an 'already resolved' CLI failure when tolerate_missing is true" {
   export PARAM_ACTION="update"
   export PARAM_COMPONENT_NAME="svc"
