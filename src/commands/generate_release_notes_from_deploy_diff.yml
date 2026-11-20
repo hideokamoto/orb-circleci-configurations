@@ -11,11 +11,16 @@ description: >
   and fetch-deploy-diff-summary.sh in sync by hand. Both scripts now live
   once, under src/scripts/, and are wired in as this command's two steps.
 
-  Requires the standalone CircleCI CLI (`circleci api ...`) on PATH — run
-  the install_circleci_cli command first.
+  The first step installs the standalone CircleCI CLI (`circleci api ...`),
+  which the build-agent binary at /usr/bin/circleci does not provide: a
+  pinned GitHub Releases tarball, verified against `circleci_cli_sha256`
+  before it is installed to /usr/local/bin (ahead of /usr/bin on PATH). The
+  download is skipped when a CLI whose `api` subcommand works is already on
+  PATH. A failed download or a checksum mismatch fails the step: the
+  non-blocking fallback below covers the API, not an unverified binary.
 
   Calls two different CircleCI CLIs on purpose: `circleci api ...` calls
-  use the standalone CLI on PATH (installed by install_circleci_cli, the
+  use the standalone CLI on PATH (installed by the first step, the
   only one with an `api` subcommand), while `env subst` calls use the
   build-agent CLI at the fixed path /usr/bin/circleci — present in every
   job container regardless of PATH — since a bare `circleci env subst`
@@ -30,6 +35,21 @@ description: >
   `RELEASE_NOTES_SOURCE=deploy-diff-summaries` and `RELEASE_NOTES_FILE`.
 
 parameters:
+  circleci_cli_version:
+    type: string
+    default: "1.0.49308"
+    description: >
+      circleci-cli release version installed by the first step (without
+      the leading "v"), matching a tag at
+      https://github.com/CircleCI-Public/circleci-cli/releases. Change it
+      together with circleci_cli_sha256: both describe the same asset.
+  circleci_cli_sha256:
+    type: string
+    default: "1beeaddd7f5652612bfd9a8a0a303bb966fb69a355d7bb9d036d537f8f9e8b17"
+    description: >
+      Expected sha256 of that release's
+      "circleci-cli_<version>_linux_amd64.tar.gz" asset. The install is
+      aborted if the downloaded tarball does not match.
   base_ref:
     type: string
     default: ""
@@ -68,6 +88,14 @@ parameters:
     description: Seconds to sleep between polls of deploy/diff-summaries/<id>.
 
 steps:
+  - run:
+      name: Install CircleCI CLI
+      environment:
+        PARAM_VERSION: <<parameters.circleci_cli_version>>
+        PARAM_SHA256: <<parameters.circleci_cli_sha256>>
+        PARAM_INSTALL_PATH: /usr/local/bin
+        PARAM_SKIP_IF_PRESENT: "true"
+      command: <<include(scripts/install_circleci_cli.sh)>>
   - run:
       name: Build Deploy Diff Summaries payload
       environment:

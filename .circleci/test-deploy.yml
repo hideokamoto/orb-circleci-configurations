@@ -93,6 +93,9 @@ jobs:
               exit 1
             fi
             echo "OK: RELEASE_NOTES_SOURCE=gh-generate-notes (non-blocking fallback confirmed)"
+      - run:
+          name: Assert the command installed the standalone CircleCI CLI
+          command: circleci api --help >/dev/null
 workflows:
   test-deploy:
     jobs:

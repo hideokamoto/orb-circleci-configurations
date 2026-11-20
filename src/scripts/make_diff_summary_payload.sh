@@ -23,8 +23,8 @@ set -uo pipefail
 #   - `circleci api ...` (in resolve_org_id) is deliberately left as bare
 #     `circleci` on PATH: it needs the standalone CLI's `api` subcommand,
 #     which the build-agent CLI does not have. That standalone CLI is
-#     installed onto PATH by the install_circleci_cli command, which must
-#     run before this one.
+#     installed onto PATH by install_circleci_cli.sh, the step that runs
+#     before this one in the same command.
 CIRCLECI_CLI="${CIRCLECI_CLI:-/usr/bin/circleci}"
 
 # Maps a `git diff --name-status` letter to the payload's status vocabulary.
@@ -230,7 +230,7 @@ build_payload() {
 # Resolves the CircleCI organization id: $CIRCLE_ORGANIZATION_ID when set
 # (normal case in an actual CircleCI job), else `circleci api projects/<id>`.
 # `circleci` here is deliberately bare/on-PATH: it is the standalone CLI's
-# `api` subcommand (installed by install_circleci_cli), not the build-agent
+# `api` subcommand (installed by install_circleci_cli.sh), not the build-agent
 # CLI at $CIRCLECI_CLI used for `env subst` elsewhere in this file.
 # Args:
 #   $1 - project_id - CircleCI project id, used to look up the org id when

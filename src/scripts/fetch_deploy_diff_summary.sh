@@ -11,8 +11,8 @@
 # (hideokamoto/circleci-configurations), which previously kept an inline
 # copy of this logic in sync with the standalone script by hand.
 #
-# Requires the standalone CircleCI CLI (`circleci api ...`) on PATH; run the
-# install_circleci_cli command first.
+# Requires the standalone CircleCI CLI (`circleci api ...`) on PATH; the
+# command's first step (install_circleci_cli.sh) installs it.
 set -uo pipefail
 # Intentionally not `-e`: API/poll failures are expected and must fall
 # through to the gh-generate-notes fallback branch instead of aborting the
@@ -26,8 +26,8 @@ set -uo pipefail
 #   - `circleci api ...` (in poll_for_summary) is deliberately left as bare
 #     `circleci` on PATH: it needs the standalone CLI's `api` subcommand,
 #     which the build-agent CLI does not have. That standalone CLI is
-#     installed onto PATH by the install_circleci_cli command, which must
-#     run before this one.
+#     installed onto PATH by install_circleci_cli.sh, the step that runs
+#     before this one in the same command.
 CIRCLECI_CLI="${CIRCLECI_CLI:-/usr/bin/circleci}"
 
 # Logs why Deploy Diff Summaries is being skipped and exports the
