@@ -109,7 +109,8 @@ yamllint -c .yamllint src .circleci
 `orb-tools/pack`, `orb-tools/review`, `shellcheck/check`, `bats/run`) on every
 push. `.circleci/test-deploy.yml` is injected with the packed orb and runs
 integration-style jobs against real orb components (see
-`test_base_pinned_executor` / `test_trivy_executor`) before a release publish.
+`test_base_pinned_executor` / `test_trivy_executor`) before any dev or
+production publish.
 
 ---
 
@@ -124,19 +125,37 @@ integration-style jobs against real orb components (see
 We welcome [issues](https://github.com/hideokamoto/orb-circleci-configurations/issues) to and [pull requests](https://github.com/hideokamoto/orb-circleci-configurations/pulls) against this repository!
 
 ### How to Publish An Update
-1. Merge pull requests with desired changes to the main branch.
-    - For the best experience, squash-and-merge and use [Conventional Commit Messages](https://conventionalcommits.org/).
-2. Find the current version of the orb.
-    - You can run `circleci orb info hideokamoto/configurations | grep "Latest"` to see the current version.
-3. Create a [new Release](https://github.com/hideokamoto/orb-circleci-configurations/releases/new) on GitHub.
-    - Click "Choose a tag" and _create_ a new [semantically versioned](http://semver.org/) tag. (ex: v1.0.0)
-      - We will have an opportunity to change this before we publish if needed after the next step.
-4.  Click _"+ Auto-generate release notes"_.
-    - This will create a summary of all of the merged pull requests since the previous release.
-    - If you have used _[Conventional Commit Messages](https://conventionalcommits.org/)_ it will be easy to determine what types of changes were made, allowing you to ensure the correct version tag is being published.
-5. Now ensure the version tag selected is semantically accurate based on the changes included.
-6. Click _"Publish Release"_.
-    - This will push a new tag and trigger your publishing pipeline on CircleCI.
+
+Production versions are released automatically when a pull request is
+merged to `main`; nobody pushes a tag or drafts a GitHub Release by hand, so
+a merge made by an AI coding agent releases exactly like one made by a
+person. The `release` job in `.circleci/test-deploy.yml` runs
+[semantic-release](https://semantic-release.gitbook.io/) (configured in
+`.releaserc.json`) after every test job and `orb-tools/pack` pass on `main`:
+
+1. The next version is derived from the
+   [Conventional Commits](https://conventionalcommits.org/) since the last
+   `v*` tag: `feat` → minor, `fix` / `perf` → patch, `!` or a
+   `BREAKING CHANGE:` footer → major. A merge containing only `docs`,
+   `chore`, `ci`, `test`, `refactor`, ... commits releases nothing. Use
+   squash-and-merge with a Conventional Commit title so each merge is one
+   commit.
+2. The packed orb is published to the registry as
+   `hideokamoto/configurations@<version>` **before** any tag exists, so a
+   failed publish leaves nothing behind and re-running the job retries the
+   same version.
+3. The `v<version>` tag and a GitHub Release (with generated notes) are then
+   created as a record of what was published.
+
+With no `v*` tag in the history yet, the first release is `1.0.0`.
+Prerequisites: the `circleci` context provides `CIRCLE_TOKEN` (orb
+publishing) and the `github` context provides `GITHUB_TOKEN`
+(`contents:write` on this repository).
+
+If the tag push fails after the orb was published (re-running then stops
+at "version already exists"), push the missing tag at the commit the
+release job ran on (`git tag v<version> <sha> && git push origin
+v<version>`), and the next merge continues from it.
 
 ### Development Orbs
 
