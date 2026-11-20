@@ -127,49 +127,76 @@ We welcome [issues](https://github.com/hideokamoto/orb-circleci-configurations/i
 
 ### How to Publish An Update
 
+CI and release run as two separate CircleCI pipelines, each with its own
+config file (managed in hideokamoto/circleci-infra):
+
+| Pipeline | Triggered by | Config | Publishes |
+| --- | --- | --- | --- |
+| `ci` | pull request opened (non-draft), marked ready for review, or pushed to while not a draft | `.circleci/config.yml` → `.circleci/test-deploy.yml` | `hideokamoto/configurations@dev:<commit-SHA1>` |
+| `release` | push to `main` (a merged pull request) | `.circleci/release.yml` → test-deploy's tests + `.circleci/release-workflow.yml` | `hideokamoto/configurations@<version>` |
+
+The integration tests are defined once, in `.circleci/test-deploy.yml`.
+`.circleci/scripts/build-release-config.sh` builds the release pipeline's
+config from it: the same test jobs and `orb-tools/pack`, with the dev orb
+publish replaced by the `release` job, which requires all of them. A test
+job added to `test-deploy.yml` therefore gates both the dev orb and the
+release. The `check-release-config` job in `.circleci/config.yml` builds
+that config on every pull request.
+
 Production versions are released automatically when a pull request is
 merged to `main`; nobody pushes a tag or drafts a GitHub Release by hand, so
 a merge made by an AI coding agent releases exactly like one made by a
-person. The `release` job in `.circleci/test-deploy.yml` runs
+person. The `release` job runs
 [semantic-release](https://semantic-release.gitbook.io/) (configured in
-`.releaserc.json`) after every test job and `orb-tools/pack` pass on `main`:
+`.releaserc.json`):
 
 1. The next version is derived from the
    [Conventional Commits](https://conventionalcommits.org/) since the last
-   `v*` tag: `feat` → minor, `fix` / `perf` → patch, `!` or a
-   `BREAKING CHANGE:` footer → major. A merge containing only `docs`,
-   `chore`, `ci`, `test`, `refactor`, ... commits releases nothing. Use
-   squash-and-merge with a Conventional Commit title so each merge is one
-   commit.
+   `v*` tag: `feat` → minor, `fix` / `perf` → patch. A merge containing only
+   `docs`, `chore`, `ci`, `test`, `refactor`, ... commits releases nothing.
+   Use squash-and-merge with a Conventional Commit title so each merge is
+   one commit.
 2. The packed orb is published to the registry as
    `hideokamoto/configurations@<version>` **before** any tag exists, so a
-   failed publish leaves nothing behind and re-running the job retries the
-   same version.
+   failed publish leaves no tag and re-running the job retries the same
+   version.
 3. The `v<version>` tag and a GitHub Release (with generated notes) are then
    created as a record of what was published.
 
-With no `v*` tag in the history yet, the first release is `1.0.0`.
+The orb is pre-GA, so versions stay at `0.x`:
+
+- **First release.** semantic-release would start at `1.0.0`. When no `v*`
+  tag exists yet, the release job tags the commit before the merge as
+  `v0.0.0`, so the first release is `0.1.0`. semantic-release pushes that
+  `v0.0.0` tag along with `v0.1.0`.
+- **Breaking changes** (`!` or a `BREAKING CHANGE:` footer) bump the minor
+  version while in `0.x` (`releaseRules` in `.releaserc.json`). To go GA,
+  remove that rule; the next breaking change then releases `1.0.0`.
+
 Prerequisites: the `circleci` context provides `CIRCLE_TOKEN` (orb
 publishing) and the `github` context provides `GITHUB_TOKEN`
 (`contents:write` on this repository).
 
 If the tag push fails after the orb was published (re-running then stops
-at "version already exists"), push the missing tag at the commit the
-release job ran on (`git tag v<version> <sha> && git push origin
-v<version>`), and the next merge continues from it.
+at "version already exists"), check that the registry has
+`hideokamoto/configurations@<version>` built from the commit the release
+job ran on, then push the missing tag at that commit
+(`git tag v<version> <sha> && git push origin v<version>`); the next merge
+continues from it.
 
 ### Development Orbs
 
-`.circleci/test-deploy.yml` already publishes a [Development orb](https://circleci.com/docs/orb-concepts/#development-orbs)
-on every non-tag build (`pub_type: dev`, requiring `orb-tools/pack` and all
-test jobs, using the `circleci` context) — no changes are needed to try an
-in-progress change before a release:
+The `ci` pipeline publishes a [Development orb](https://circleci.com/docs/orb-concepts/#development-orbs)
+for every pull request build (`pub_type: dev`, requiring `orb-tools/pack`
+and all test jobs, using the `circleci` context) — no changes are needed to
+try an in-progress change before a release:
 
-- **Every branch** publishes `hideokamoto/configurations@dev:<commit-SHA1>`.
-  Use this to try a specific commit or an open PR from another repository.
-- **Only `main`** also moves `hideokamoto/configurations@dev:alpha`, so
-  `dev:alpha` always means "latest reviewed `main`" and a PR build can never
-  change what `dev:alpha` consumers run.
+- **Every non-draft pull request** publishes
+  `hideokamoto/configurations@dev:<commit-SHA1>` for its head commit (draft
+  pull requests run nothing until they are marked ready for review). Use
+  this to try a specific commit from another repository.
+- There is no moving dev label (such as `dev:alpha`); use a released
+  version, or a specific `dev:<commit-SHA1>`.
 
 Dev orbs expire 90 days after their last publish, so long-lived pipelines
 should not depend on a dev label. The job output contains a link to the
