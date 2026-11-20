@@ -46,6 +46,7 @@ the map, not the spec.
 | executor | `trivy` | Digest-pinned `aquasec/trivy` image for SBOM generation and vulnerability scanning. |
 | command | `audit_deps` | Detects the checkout's package manager (pnpm/npm) and runs its security audit. |
 | command | `chunk_audit_fix` | Asks CircleCI's Chunk agent to open a `fix(deps):` PR after a failed dependency audit. |
+| command | `install_cdkd` | Installs a version-pinned cdkd CLI. |
 | command | `generate_release_notes_from_deploy_diff` | Installs the standalone CircleCI CLI (sha256-pinned), then generates release notes from CircleCI Deploy Diff Summaries, falling back to `gh release create --generate-notes`. |
 | job | `dependency_audit` | Runs `audit_deps`, then on failure `chunk_audit_fix` and a Slack notification. |
 
