@@ -115,6 +115,19 @@ teardown() {
   [ ! -s "${CALL_LOG}" ]
 }
 
+@test "halts on an existing release when skip_if_exists is \"1\" (how CircleCI renders a true boolean in environment)" {
+  export PARAM_SKIP_IF_EXISTS="1"
+  export RELEASE_TAG="2026.09.03-abc1234"
+  export GH_VIEW_EXIT=0
+
+  run bash "${SCRIPT}"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Release 2026.09.03-abc1234 already exists; skipping."* ]]
+
+  grep -q "step halt" "${HALT_LOG}"
+  [ ! -s "${CALL_LOG}" ]
+}
+
 @test "branch 1: uses --notes-file when the notes source is deploy-diff-summaries" {
   export RELEASE_TAG="2026.09.03-abc1234"
   export RELEASE_NOTES_SOURCE="deploy-diff-summaries"

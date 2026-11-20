@@ -66,7 +66,7 @@ gh_release_create_race_safe() {
 # Reads (indirectly, via the PARAM_*_ENV name parameters, all exported by
 # the calling orb command step):
 #   PARAM_TAG_ENV           - name of the env var holding the release tag
-#   PARAM_SKIP_IF_EXISTS    - "true"/"false"; whether to no-op on an
+#   PARAM_SKIP_IF_EXISTS    - "1"/"true" or "0"/"false"; whether to no-op on an
 #                             existing release for the tag
 #   PARAM_NOTES_SOURCE_ENV  - name of the env var selecting the notes source
 #   PARAM_PREV_TAG_ENV      - name of the env var holding the previous tag
@@ -92,13 +92,18 @@ create_github_release() {
         exit 1
     fi
 
-    if [ "${PARAM_SKIP_IF_EXISTS}" = "true" ]; then
-        if gh release view "${tag}" >/dev/null 2>&1; then
-            echo "Release ${tag} already exists; skipping."
-            circleci-agent step halt
-            return 0
-        fi
-    fi
+    # CircleCI renders a boolean parameter placed in `environment:` as
+    # "1"/"0" (the official circleci/aws-cli orb tests its *_BOOL_* vars
+    # with `-eq 1`), while direct/test invocations pass "true"/"false".
+    case "${PARAM_SKIP_IF_EXISTS}" in
+        1 | true)
+            if gh release view "${tag}" >/dev/null 2>&1; then
+                echo "Release ${tag} already exists; skipping."
+                circleci-agent step halt
+                return 0
+            fi
+            ;;
+    esac
 
     notes_source_env="${PARAM_NOTES_SOURCE_ENV}"
     notes_source="${!notes_source_env:-}"
