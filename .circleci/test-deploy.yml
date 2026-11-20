@@ -6,18 +6,12 @@ orbs:
   # The orb definition is intentionally not included here. It will be injected into the pipeline.
   configurations: {}
 
-# Use this tag to ensure test jobs always run,
-# even though the downstream publish job will only run on release tags.
+# Test jobs run on every branch and on tags. Tags no longer trigger a
+# release (see the release job); the v* tags that release pushes simply get
+# the same tests run against them.
 filters: &filters
   tags:
     only: /.*/
-
-# Filter for release tags.
-release-filters: &release-filters
-  branches:
-    ignore: /.*/
-  tags:
-    only: /^v[0-9]+\.[0-9]+\.[0-9]+$/
 
 jobs:
   # Exercise the orb's executors directly, so a packaging or parameter
@@ -76,6 +70,86 @@ jobs:
             unset CIRCLE_TOKEN GITHUB_TOKEN
             bash src/scripts/chunk_audit_fix.sh
             grep -q 'CHUNK_AUDIT_FIX_SUMMARY' "$BASH_ENV"
+  # Production release on every push to main. Nothing has to push a tag or
+  # create a GitHub Release to trigger it, so a merge made by a person or by
+  # an AI coding agent releases the same way. Mirrors the semantic-release
+  # flow in circleci-configurations' workflows/publish/*-semantic-release.yaml,
+  # with `circleci orb publish` in place of npm publish (see .releaserc.json):
+  #   1. Next version from the Conventional Commits since the last v* tag
+  #      (feat -> minor, fix/perf -> patch, `!`/BREAKING CHANGE -> major).
+  #      docs/chore/ci/test/refactor-only merges release nothing.
+  #   2. verifyConditions (before anything is created): the packed orb is
+  #      present and valid, CIRCLE_TOKEN is set, and GITHUB_TOKEN can push.
+  #   3. prepare: publish hideokamoto/configurations@<version> to the orb
+  #      registry. Done before the tag on purpose: if publishing fails, no
+  #      tag exists yet, so re-running the job retries the same version.
+  #   4. Push the v<version> tag, then create the GitHub Release (a record of
+  #      what was published; neither triggers anything).
+  # With no v* tag in history yet, semantic-release's first release is 1.0.0.
+  release:
+    docker:
+      # Node 24 satisfies semantic-release 25's engine requirement.
+      - image: cimg/node:24.22
+    resource_class: medium
+    steps:
+      - checkout
+      - attach_workspace:
+          at: dist
+      - run:
+          name: Check prerequisites
+          command: |
+            set -euo pipefail
+            if [ -z "${GITHUB_TOKEN:-}" ]; then
+              echo "GITHUB_TOKEN is required in the github context." >&2
+              exit 1
+            fi
+            if [ -z "${CIRCLE_TOKEN:-}" ]; then
+              echo "CIRCLE_TOKEN (orb publishing) is required in the circleci context." >&2
+              exit 1
+            fi
+            # semantic-release finds the previous release from tags.
+            git fetch --tags origin
+      - run:
+          name: Unpack the tested orb from orb-tools/pack
+          command: |
+            set -euo pipefail
+            # orb-tools/pack persists dist/ as a single tarball.
+            tar -xzf dist/orb_source.tar.gz -C dist
+            rm dist/orb_source.tar.gz
+            test -s dist/orb.yml
+      - run:
+          name: Install the standalone CircleCI CLI (sha256-pinned)
+          command: |
+            set -euo pipefail
+            # /usr/bin/circleci on cimg images is the build-agent binary, which
+            # has no `orb publish`. Same pinned release as this orb's
+            # install_circleci_cli command; installed ahead of /usr/bin on PATH.
+            version="1.0.49308"
+            sha256="1beeaddd7f5652612bfd9a8a0a303bb966fb69a355d7bb9d036d537f8f9e8b17"
+            tmp_dir="$(mktemp -d)"
+            curl -fLSs --connect-timeout 10 --max-time 120 -o "${tmp_dir}/cli.tar.gz" \
+              "https://github.com/CircleCI-Public/circleci-cli/releases/download/v${version}/circleci-cli_${version}_linux_amd64.tar.gz"
+            echo "${sha256}  ${tmp_dir}/cli.tar.gz" | sha256sum -c -
+            tar -xzf "${tmp_dir}/cli.tar.gz" -C "${tmp_dir}" circleci
+            sudo install -m 0755 "${tmp_dir}/circleci" /usr/local/bin/circleci
+            rm -rf "${tmp_dir}"
+            circleci version
+      - run:
+          name: Install release tools (without lifecycle scripts)
+          command: |
+            set -euo pipefail
+            # Pinned: these tools receive a contents:write token and the orb
+            # publishing token. Versions match circleci-configurations'
+            # semantic-release templates, plus @semantic-release/exec.
+            npm install --prefix "${HOME}/release-tools" --ignore-scripts --no-audit --no-fund \
+              semantic-release@25.0.9 \
+              conventional-changelog-conventionalcommits@9.3.1 \
+              @semantic-release/exec@7.1.0
+      - run:
+          name: Release with semantic-release
+          command: |
+            set -euo pipefail
+            "${HOME}/release-tools/node_modules/.bin/semantic-release"
   test_push_deploy_tag:
     # Exercises the push_deploy_tag command against a throwaway local bare
     # git remote (never a real upstream), covering both the "no tag yet"
@@ -169,16 +243,21 @@ workflows:
               ignore: main
             tags:
               ignore: /.*/
-      - orb-tools/publish:
-          orb_name: hideokamoto/configurations
-          vcs_type: << pipeline.project.type >>
-          pub_type: production
-          # Ensure this job requires all test jobs and the pack job.
+      # Production orbs: released by semantic-release on every push to main
+      # (see the release job above). Requires every test job and the pack.
+      - release:
           requires:
             - orb-tools/pack
             - test_base_pinned_executor
             - test_trivy_executor
             - test_dependency_audit
             - test_push_deploy_tag
-          context: circleci
-          filters: *release-filters
+          context:
+            - circleci
+            - github
+          filters:
+            branches:
+              only: main
+            tags:
+              ignore: /.*/
+          serial-group: << pipeline.project.slug >>/release
