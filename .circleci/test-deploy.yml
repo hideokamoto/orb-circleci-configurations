@@ -168,23 +168,31 @@ jobs:
             git commit --allow-empty -m "seed commit"
             git push origin HEAD:main
             echo "export CIRCLE_SHA1=$(git rev-parse HEAD)" >> "$BASH_ENV"
+            # Fix the tag's date once for the whole job. Re-evaluating
+            # "date -u" in each step would make the job flaky across a UTC
+            # midnight: the verify step could look for a different date than
+            # the command used, and the second run could create a new tag
+            # instead of exercising the skip path. date_format below is the
+            # env var reference, which the command expands via
+            # "circleci env subst" into a literal (no % specifiers) date.
+            echo "export FIXTURE_DATE=$(date -u +%Y.%m.%d)" >> "$BASH_ENV"
       - configurations/push_deploy_tag:
-          date_format: "%Y.%m.%d"
+          date_format: "${FIXTURE_DATE}"
           sha_length: 7
       - run:
           name: Verify the tag was created and pushed to the local remote
           command: |
             set -euo pipefail
-            TAG="$(date -u +%Y.%m.%d)-${CIRCLE_SHA1:0:7}"
+            TAG="${FIXTURE_DATE}-${CIRCLE_SHA1:0:7}"
             git ls-remote --tags origin "$TAG" | grep -q "$TAG"
       - configurations/push_deploy_tag:
-          date_format: "%Y.%m.%d"
+          date_format: "${FIXTURE_DATE}"
           sha_length: 7
       - run:
           name: Verify a second run hits the skip path without erroring
           command: |
             set -euo pipefail
-            TAG="$(date -u +%Y.%m.%d)-${CIRCLE_SHA1:0:7}"
+            TAG="${FIXTURE_DATE}-${CIRCLE_SHA1:0:7}"
             COUNT="$(git ls-remote --tags origin | grep -c "$TAG")"
             [ "$COUNT" -eq 1 ]
 workflows:
