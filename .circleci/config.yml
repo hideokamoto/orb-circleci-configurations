@@ -32,6 +32,16 @@ jobs:
             jq -e '.workflows.release.jobs[-1].release.requires | index("orb-tools/pack") != null' /tmp/release-deploy.yml
             jq -e '.jobs.release.steps | length > 0' /tmp/release-deploy.yml
 
+  # CircleCI passes a boolean parameter to a script's environment as "1", not
+  # "true"; this fails when such a parameter has no BATS test using "1".
+  check-bool-env-tests:
+    executor: orb-tools/default
+    steps:
+      - checkout
+      - run:
+          name: Check boolean environment parameters are tested with "1"
+          command: bash .circleci/scripts/check-bool-env-tests.sh
+
 workflows:
   lint-pack:
     jobs:
@@ -49,10 +59,12 @@ workflows:
           filters: *filters
       - check-release-config:
           filters: *filters
+      - check-bool-env-tests:
+          filters: *filters
       # Triggers the next workflow in the Orb Development Kit.
       - orb-tools/continue:
           pipeline_number: << pipeline.number >>
           vcs_type: << pipeline.project.type >>
           orb_name: configurations
-          requires: [orb-tools/lint, orb-tools/pack, orb-tools/review, shellcheck/check, bats/run, check-release-config]
+          requires: [orb-tools/lint, orb-tools/pack, orb-tools/review, shellcheck/check, bats/run, check-release-config, check-bool-env-tests]
           filters: *filters
