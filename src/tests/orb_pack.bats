@@ -44,6 +44,6 @@ dev_cli_orb_pack() {
   if [ "$status" -ne 0 ]; then echo "$output" >&2; fi
   [ "$status" -eq 0 ]
 
-  ! echo "$output" | grep -q 'greet'
-  ! echo "$output" | grep -q 'hello'
+  ! echo "$output" | grep -q 'greet' || false
+  ! echo "$output" | grep -q 'hello' || false
 }
