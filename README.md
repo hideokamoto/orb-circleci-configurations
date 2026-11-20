@@ -47,6 +47,7 @@ the map, not the spec.
 | command | `audit_deps` | Detects the checkout's package manager (pnpm/npm) and runs its security audit. |
 | command | `chunk_audit_fix` | Asks CircleCI's Chunk agent to open a `fix(deps):` PR after a failed dependency audit. |
 | command | `install_cdkd` | Installs a version-pinned cdkd CLI. |
+| command | `create_github_release` | Idempotently creates a GitHub Release for the deploy tag resolved by `resolve_deploy_tag`. |
 | command | `deploy_marker_update` | Updates a CircleCI Deploys release marker's status (used by `with_deploy_marker`, or standalone). |
 | command | `with_deploy_marker` | Wraps deployment steps in a CircleCI Deploys release marker (plan, RUNNING, then SUCCESS or FAILED). |
 | job | `dependency_audit` | Runs `audit_deps`, then on failure `chunk_audit_fix` and a Slack notification. |
