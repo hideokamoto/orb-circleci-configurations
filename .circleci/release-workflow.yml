@@ -87,8 +87,9 @@ jobs:
           command: |
             set -euo pipefail
             # /usr/bin/circleci on cimg images is the build-agent binary, which
-            # has no `orb publish`. Same pinned release as this orb's
-            # install_circleci_cli command; installed ahead of /usr/bin on PATH.
+            # has no `orb publish`. Installed ahead of /usr/bin on PATH. When
+            # bumping version/sha256, update the other pinned copy in
+            # src/commands/generate_release_notes_from_deploy_diff.yml too.
             version="1.0.49308"
             sha256="1beeaddd7f5652612bfd9a8a0a303bb966fb69a355d7bb9d036d537f8f9e8b17"
             tmp_dir="$(mktemp -d)"
