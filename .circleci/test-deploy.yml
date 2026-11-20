@@ -197,8 +197,14 @@ jobs:
           command: |
             test -f /tmp/gh-release-create-args
             grep -q -- '--generate-notes' /tmp/gh-release-create-args
-            ! grep -q -- '--notes-start-tag' /tmp/gh-release-create-args
-            ! grep -q -- '--notes-file' /tmp/gh-release-create-args
+            # Explicit if/exit: a bare "! grep" is exempt from errexit, so a
+            # non-final negated check would never fail the step.
+            if grep -q -- '--notes-start-tag' /tmp/gh-release-create-args; then
+              echo "unexpected --notes-start-tag on a first release" >&2; exit 1
+            fi
+            if grep -q -- '--notes-file' /tmp/gh-release-create-args; then
+              echo "unexpected --notes-file on a first release" >&2; exit 1
+            fi
 workflows:
   test-deploy:
     jobs:
