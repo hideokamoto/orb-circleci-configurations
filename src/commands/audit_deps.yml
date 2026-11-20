@@ -1,0 +1,21 @@
+description: >
+  Detect the checkout's package manager (pnpm or npm, from its lockfile) and run
+  its security audit. Fails the step when advisories at or above `audit_level`
+  exist. Exports DEP_AUDIT_PM for a later `chunk_audit_fix` step.
+parameters:
+  audit_level:
+    type: string
+    default: high
+    description: Severity threshold passed to `<pm> audit --audit-level`.
+  package_manager:
+    type: enum
+    enum: [auto, pnpm, npm]
+    default: auto
+    description: Force a package manager instead of lockfile auto-detection.
+steps:
+  - run:
+      name: Dependency audit
+      environment:
+        DEP_AUDIT_LEVEL: <<parameters.audit_level>>
+        DEP_AUDIT_PM_OVERRIDE: <<parameters.package_manager>>
+      command: <<include(scripts/audit_deps.sh)>>

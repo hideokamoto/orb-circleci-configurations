@@ -1,0 +1,20 @@
+description: >
+  Run a job on the orb's digest-pinned cimg/base executor, so lightweight
+  steps (deploy markers, release automation) run against a reproducible base
+  image instead of a mutable tag.
+usage:
+  version: 2.1
+  orbs:
+    configurations: hideokamoto/configurations@1.0.0
+  jobs:
+    check-base-image:
+      executor: configurations/base_pinned
+      steps:
+        - checkout
+        - run:
+            name: Print OS release info
+            command: cat /etc/os-release
+  workflows:
+    use-pinned-base:
+      jobs:
+        - check-base-image
