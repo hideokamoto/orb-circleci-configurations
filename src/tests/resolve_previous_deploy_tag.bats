@@ -186,7 +186,7 @@ read_bash_env_var() {
     run main
     [ "$status" -eq 0 ]
 
-    ! grep -q 'PREV_RELEASE_TAG' "${BASH_ENV}"
+    ! grep -q 'PREV_RELEASE_TAG' "${BASH_ENV}" || false
     [[ "$output" == *"no previous release tag found"* ]]
 }
 
