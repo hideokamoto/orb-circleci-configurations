@@ -48,6 +48,7 @@ the map, not the spec.
 | command | `chunk_audit_fix` | Asks CircleCI's Chunk agent to open a `fix(deps):` PR after a failed dependency audit. |
 | command | `install_cdkd` | Installs a version-pinned cdkd CLI. |
 | command | `create_github_release` | Idempotently creates a GitHub Release for the deploy tag resolved by `resolve_deploy_tag`. |
+| command | `resolve_previous_deploy_tag` | Resolves the release tag before the current one from the commit graph. |
 | command | `send_sbom_to_port` | POSTs a CycloneDX SBOM to a Port.io webhook data source. |
 | job | `dependency_audit` | Runs `audit_deps`, then on failure `chunk_audit_fix` and a Slack notification. |
 
