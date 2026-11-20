@@ -9,6 +9,29 @@ filters: &filters
   tags:
     only: /.*/
 
+jobs:
+  # Builds the release pipeline's continuation config from this branch's
+  # test-deploy.yml, in the same executor (and so the same yq/jq) that
+  # .circleci/release.yml uses, so a change that would break the release on
+  # main fails here on the pull request instead.
+  check-release-config:
+    executor: orb-tools/default
+    steps:
+      - checkout
+      - run:
+          name: Build the release continuation config
+          command: bash .circleci/scripts/build-release-config.sh /tmp/release-deploy.yml
+      - run:
+          name: Check the release workflow
+          command: |
+            set -euo pipefail
+            # yq must parse the output: orb-tools/continue injects the orb with yq.
+            yq '.orbs.configurations' /tmp/release-deploy.yml > /dev/null
+            jq -e '.workflows | keys == ["release"]' /tmp/release-deploy.yml
+            jq -e '[.workflows.release.jobs[] | keys[0]] | index("orb-tools/publish") == null' /tmp/release-deploy.yml
+            jq -e '.workflows.release.jobs[-1].release.requires | index("orb-tools/pack") != null' /tmp/release-deploy.yml
+            jq -e '.jobs.release.steps | length > 0' /tmp/release-deploy.yml
+
 workflows:
   lint-pack:
     jobs:
@@ -24,10 +47,12 @@ workflows:
       - bats/run:
           path: src/tests
           filters: *filters
+      - check-release-config:
+          filters: *filters
       # Triggers the next workflow in the Orb Development Kit.
       - orb-tools/continue:
           pipeline_number: << pipeline.number >>
           vcs_type: << pipeline.project.type >>
           orb_name: configurations
-          requires: [orb-tools/lint, orb-tools/pack, orb-tools/review, shellcheck/check, bats/run]
+          requires: [orb-tools/lint, orb-tools/pack, orb-tools/review, shellcheck/check, bats/run, check-release-config]
           filters: *filters
