@@ -1,0 +1,23 @@
+{
+  "branches": ["main"],
+  "tagFormat": "v${version}",
+  "plugins": [
+    ["@semantic-release/commit-analyzer", { "preset": "conventionalcommits" }],
+    ["@semantic-release/release-notes-generator", { "preset": "conventionalcommits" }],
+    [
+      "@semantic-release/exec",
+      {
+        "verifyConditionsCmd": "test -s dist/orb.yml && test -n \"$CIRCLE_TOKEN\" && circleci orb validate dist/orb.yml --skip-update-check",
+        "prepareCmd": "circleci orb publish dist/orb.yml hideokamoto/configurations@${nextRelease.version} --skip-update-check --token \"$CIRCLE_TOKEN\""
+      }
+    ],
+    [
+      "@semantic-release/github",
+      {
+        "successComment": false,
+        "failComment": false,
+        "releasedLabels": false
+      }
+    ]
+  ]
+}
