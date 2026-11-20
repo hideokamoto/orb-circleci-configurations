@@ -5,6 +5,7 @@ orbs:
   orb-tools: circleci/orb-tools@12.3
   # The orb definition is intentionally not included here. It will be injected into the pipeline.
   configurations: {}
+  node: circleci/node@7.2.1
 
 # This continuation is the single definition of the orb's integration test
 # jobs. The ci pipeline (pull request events only) runs it as-is and ends in
@@ -15,6 +16,11 @@ orbs:
 filters: &filters
   tags:
     only: /.*/
+
+# The cdkd version test_install_cdkd expects the install_cdkd command to
+# install by default. It must equal the command's default `version`
+# parameter (src/commands/install_cdkd.yml); the test fails if they drift.
+cdkd-test-version: &cdkd_test_version "0.280.15"
 
 jobs:
   # Exercise the orb's executors directly, so a packaging or parameter
@@ -73,6 +79,24 @@ jobs:
             unset CIRCLE_TOKEN GITHUB_TOKEN
             bash src/scripts/chunk_audit_fix.sh
             grep -q 'CHUNK_AUDIT_FIX_SUMMARY' "$BASH_ENV"
+  # Command-test for install_cdkd: run it with its default (pinned) version
+  # -- no `version` override, so a change to the command's default that is
+  # not mirrored in cdkd_test_version fails here -- and assert
+  # `cdkd --version` reports exactly that version (not merely a prefix of
+  # it — "0.280.150" must fail this check).
+  test_install_cdkd:
+    executor:
+      name: node/default
+      tag: "22.14"
+    steps:
+      - configurations/install_cdkd
+      - run:
+          name: Assert cdkd --version reports exactly the pinned version
+          environment:
+            EXPECTED_CDKD_VERSION: *cdkd_test_version
+          command: |
+            actual="$(cdkd --version)"
+            test "${actual}" = "${EXPECTED_CDKD_VERSION}"
   # Exercises with_deploy_marker end to end: plan -> RUNNING -> steps ->
   # SUCCESS against a real "orb-test" component in the "ci-validation"
   # environment. This does create a real deploy marker in this orb repo's
@@ -104,6 +128,8 @@ workflows:
           filters: *filters
       - test_with_deploy_marker:
           filters: *filters
+      - test_install_cdkd:
+          filters: *filters
       # The orb must be re-packed for publishing, and saved to the workspace.
       - orb-tools/pack:
           filters: *filters
@@ -122,6 +148,7 @@ workflows:
             - test_base_pinned_executor
             - test_trivy_executor
             - test_dependency_audit
+            - test_install_cdkd
             - test_with_deploy_marker
           context: circleci
           filters: *filters
