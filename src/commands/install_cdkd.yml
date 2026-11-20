@@ -1,0 +1,25 @@
+description: >
+  Installs a version-pinned copy of the cdkd CLI (https://github.com/go-to-k/cdkd),
+  a wrapper around AWS CDK used by cdkd-based deploy pipelines for bootstrap,
+  synth/deploy, and rollback. The version is pinned rather than resolved to
+  "latest" so that a CI run against a given commit stays reproducible: an
+  unpinned install can pick up a new cdkd release without any change to this
+  repository, making review results and deploy behavior non-deterministic over
+  time. To adopt a newer cdkd release, bump the `version` parameter in a
+  reviewed commit (do not track "latest").
+
+parameters:
+  version:
+    type: string
+    default: "0.280.15"
+    description: >
+      The exact cdkd version to install (no leading "v", no range). Passed
+      through `circleci env subst`, so a pipeline/environment variable
+      reference (e.g. "$CDKD_VERSION") may be supplied by the caller.
+
+steps:
+  - run:
+      name: Install cdkd
+      environment:
+        PARAM_VERSION: <<parameters.version>>
+      command: <<include(scripts/install_cdkd.sh)>>
