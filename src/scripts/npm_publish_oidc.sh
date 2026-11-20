@@ -74,13 +74,17 @@ publish() {
   # publishConfig.access, not by this command.
   local cmd
   cmd="$("${cli}" env subst "${PARAM_PUBLISH_COMMAND}")"
-  # The child bash re-sources $BASH_ENV on startup (non-interactive bash
-  # does), so a legacy `export NPM_TOKEN=...` an earlier step appended there
-  # would come back after the unset above. Clear the legacy token variables
-  # again inside the child, after $BASH_ENV has been read and right before
-  # the publish command runs. The command string is passed as a positional
-  # argument and evaluated there, exactly as `bash -c "${cmd}"` would parse it.
-  bash -c 'unset NODE_AUTH_TOKEN NPM_TOKEN; eval "$1"' npm_publish_oidc "${cmd}"
+  # Every non-interactive bash re-sources $BASH_ENV on startup, so a legacy
+  # `export NPM_TOKEN=...` an earlier step appended there would come back in
+  # the shell that runs publish_command -- and again in any bash that command
+  # starts (`bash -c ...`, a bash-shebang publish script). Run the publish
+  # command with BASH_ENV removed from its environment, so no shell in that
+  # process tree re-reads it, and with both legacy token variables removed.
+  # Nothing exported is lost: this step's shell already sourced $BASH_ENV
+  # before this script ran, and its exports (PATH, earlier steps' values,
+  # NPM_ID_TOKEN) are inherited as usual. Only non-exported definitions from
+  # $BASH_ENV (e.g. shell functions) are not re-created for the command.
+  env -u BASH_ENV -u NODE_AUTH_TOKEN -u NPM_TOKEN bash -c "${cmd}"
 }
 
 # Script entry point, run only when this file is executed directly (not

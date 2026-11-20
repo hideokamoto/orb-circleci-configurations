@@ -128,6 +128,32 @@ teardown() {
   [ -f "${MARKER_FILE}" ]
 }
 
+@test "legacy tokens from BASH_ENV stay out of a bash started by publish_command" {
+  # publish_command may itself start bash (`bash -c ...`, a bash-shebang
+  # publish script); that bash must not re-read BASH_ENV and get the legacy
+  # tokens back either.
+  export BASH_ENV="${TEST_TMPDIR}/bash_env"
+  {
+    echo 'export NPM_TOKEN="legacy-npm-token-from-bash-env"'
+    echo 'export NODE_AUTH_TOKEN="legacy-node-auth-token-from-bash-env"'
+    echo 'export EARLIER_STEP_VALUE="kept"'
+  } > "${BASH_ENV}"
+  cat > "${TEST_TMPDIR}/publish.sh" <<SCRIPT
+#!/usr/bin/env bash
+[ -z "\${NODE_AUTH_TOKEN-}" ] && [ -z "\${NPM_TOKEN-}" ] && [ "\${EARLIER_STEP_VALUE-}" = kept ] && [ "\${NPM_ID_TOKEN-}" = token-for-nested-bash-check ] && touch '${MARKER_FILE}'
+SCRIPT
+  chmod +x "${TEST_TMPDIR}/publish.sh"
+  export STUB_OIDC_TOKEN="token-for-nested-bash-check"
+  export PARAM_AUDIENCE="npm:registry.npmjs.org"
+  export PARAM_PUBLISH_COMMAND="bash -c '${TEST_TMPDIR}/publish.sh'"
+
+  run bash "${SCRIPT}"
+  unset BASH_ENV
+
+  [ "$status" -eq 0 ]
+  [ -f "${MARKER_FILE}" ]
+}
+
 @test "publish_command is fully overridable (e.g. Changesets monorepo publish)" {
   export STUB_OIDC_TOKEN="token-for-command-override"
   export PARAM_AUDIENCE="npm:registry.npmjs.org"
