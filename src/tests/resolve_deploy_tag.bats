@@ -96,7 +96,7 @@ teardown() {
     [ "$status" -eq 0 ]
     [ -f "$HALT_LOG" ]
     grep -q "step halt" "$HALT_LOG"
-    ! grep -q "RELEASE_TAG" "$BASH_ENV"
+    ! grep -q "RELEASE_TAG" "$BASH_ENV" || false
 }
 
 @test "does not halt when halt_if_missing is false and no tag matches" {
@@ -106,7 +106,7 @@ teardown() {
 
     [ "$status" -eq 0 ]
     [ ! -f "$HALT_LOG" ]
-    ! grep -q "RELEASE_TAG" "$BASH_ENV"
+    ! grep -q "RELEASE_TAG" "$BASH_ENV" || false
 }
 
 @test "returns the alphabetically-first regex-matching tag when several match the same commit" {
@@ -129,7 +129,7 @@ teardown() {
 
     [ "$status" -eq 0 ]
     grep -q 'export RELEASE_TAG=2026.01.01-1234567' "$BASH_ENV"
-    ! grep -q "release-v9" "$BASH_ENV"
+    ! grep -q "release-v9" "$BASH_ENV" || false
 }
 
 @test "falls back to CIRCLE_SHA1 when commit parameter is empty" {
@@ -175,7 +175,7 @@ teardown() {
 
     [ "$status" -ne 0 ]
     [ ! -f "$HALT_LOG" ]
-    ! grep -q "RELEASE_TAG" "$BASH_ENV"
+    ! grep -q "RELEASE_TAG" "$BASH_ENV" || false
 }
 
 @test "rejects an invalid tag_regex before doing any network I/O" {
@@ -211,7 +211,7 @@ EOF
 
     [ "$status" -eq 0 ]
     [ -f "$HALT_LOG" ]
-    ! grep -q "RELEASE_TAG" "$BASH_ENV"
+    ! grep -q "RELEASE_TAG" "$BASH_ENV" || false
 }
 
 @test "fails when git tag --points-at itself fails" {
@@ -229,7 +229,7 @@ EOF
 
     [ "$status" -ne 0 ]
     [ ! -f "$HALT_LOG" ]
-    ! grep -q "RELEASE_TAG" "$BASH_ENV"
+    ! grep -q "RELEASE_TAG" "$BASH_ENV" || false
 }
 
 @test "fails without halting or exporting when output_env is not a valid Bash identifier" {
