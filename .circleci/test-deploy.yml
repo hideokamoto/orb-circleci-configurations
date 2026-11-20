@@ -238,6 +238,27 @@ jobs:
             - run:
                 name: Simulated deploy
                 command: echo "deploying orb-test to ci-validation"
+  test_skip_unless_changed:
+    # Exercises the command's "continue" path against this checkout's real
+    # git history: base_revision is left empty (mirrors a GitHub App
+    # pipeline where pipeline.git.base_revision resolves empty) so the
+    # command falls back to fallback=parent_commit (HEAD^1), then halts
+    # unless a src/ path changed between HEAD^1 and HEAD. Every PR touching
+    # this command touches src/, so this exercises the non-halt branch on
+    # real data; the halt branch is covered by BATS against a stubbed
+    # circleci-agent (halting here would also make the job report success,
+    # so it cannot itself prove a halt happened).
+    executor: configurations/base_pinned
+    steps:
+      - checkout
+      - configurations/skip_unless_changed:
+          base_revision: ""
+          fallback: parent_commit
+          mode: skip_unless_matches
+          pattern: '^src/'
+      - run:
+          name: Confirm this step ran (job was not halted)
+          command: echo "skip_unless_changed continued past the skip check as expected"
   test_cdk_synth:
     # No checkout: this job only exercises the command against a throwaway
     # fixture, not the orb repo itself.
@@ -294,6 +315,8 @@ workflows:
           filters: *filters
       - test_cdk_synth:
           filters: *filters
+      - test_skip_unless_changed:
+          filters: *filters
       - test_with_deploy_marker:
           filters: *filters
       - test_npm_publish_oidc:
@@ -330,6 +353,7 @@ workflows:
             - test_resolve_previous_deploy_tag
             - test_generate_release_notes_from_deploy_diff
             - test_with_deploy_marker
+            - test_skip_unless_changed
             - test_cdk_synth
             - test_npm_publish_oidc
           context: circleci
