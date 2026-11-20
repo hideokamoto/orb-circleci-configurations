@@ -99,11 +99,15 @@ jobs:
             {
               "name": "cdk-synth-fixture",
               "private": true,
+              "packageManager": "pnpm@10.34.9",
               "scripts": {
                 "synth": "env | grep '^CDK_DEFAULT_' | sort > synth-output.txt"
               }
             }
             PKGJSON
+      # packageManager above pins the pnpm that corepack provisions. Without
+      # it corepack fetches the newest pnpm, and pnpm 12 dropped the
+      # bin/pnpm.cjs entry point that Node 22.14's bundled corepack loads.
       - run:
           name: Enable pnpm via corepack
           command: corepack enable pnpm
