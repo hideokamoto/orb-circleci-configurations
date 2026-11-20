@@ -288,6 +288,45 @@ line5
   [ "$(echo "$result" | jq -r '.[0].patch | utf8bytelength')" -eq 32768 ]
 }
 
+@test "build_files_json fails (no empty patch) when the patch temp file cannot be created" {
+  commit_file "src.txt" "v1"
+  BASE_SHA="$(git rev-parse HEAD)"
+  printf 'v2\n' > src.txt
+  git add -A && git commit -q -m "change"
+  HEAD_SHA="$(git rev-parse HEAD)"
+
+  source "$PAYLOAD_SCRIPT" bats-core
+  # Simulate an exhausted temp dir. Previously this produced
+  # {"patch": ""} and exit 0, so the gh --generate-notes fallback never ran.
+  mktemp() { return 1; }
+  run build_files_json "${BASE_SHA}..${HEAD_SHA}"
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Failed to create a temp file for the patch of src.txt"* ]]
+  [[ "$output" != *'"patch"'* ]]
+}
+
+@test "build_files_json fails when converting a patch to JSON fails" {
+  commit_file "src.txt" "v1"
+  BASE_SHA="$(git rev-parse HEAD)"
+  printf 'v2\n' > src.txt
+  git add -A && git commit -q -m "change"
+  HEAD_SHA="$(git rev-parse HEAD)"
+
+  source "$PAYLOAD_SCRIPT" bats-core
+  # Fail only the raw-input (-R) jq call that wraps the patch.
+  jq() {
+    case " $* " in
+      *" -R "*) return 1 ;;
+    esac
+    command jq "$@"
+  }
+  run build_files_json "${BASE_SHA}..${HEAD_SHA}"
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Failed to build the payload entry for src.txt"* ]]
+}
+
 # ---- make_diff_summary_payload.sh: build_payload / empty range -------------
 
 @test "build_payload succeeds when the files array exceeds the single-argument limit (ARG_MAX regression)" {

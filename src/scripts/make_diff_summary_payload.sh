@@ -130,23 +130,40 @@ build_files_json() {
     # ARG_MAX; it is omitted for lockfiles and binaries ("-" numstat) and
     # capped at MAX_PATCH_BYTES otherwise. The diff goes to a temp file first
     # so `head -c` closing the pipe early can't SIGPIPE `git diff` under
-    # pipefail.
+    # pipefail. This script runs without `set -e`, so every step here is
+    # checked explicitly: otherwise a failed mktemp/write would feed jq an
+    # empty stream and silently yield `patch: ""` as if the diff were empty,
+    # and the caller's gh --generate-notes fallback would never run.
     if omit_patch_for_file "$filename" || [ "${additions:-}" = "-" ]; then
-      file_obj="$(
+      if ! file_obj="$(
         jq -n -c \
           --arg filename "$filename" --arg status "$status_word" \
           --argjson additions "$additions_num" --argjson deletions "$deletions_num" \
           '{filename: $filename, status: $status, additions: $additions, deletions: $deletions}'
-      )"
+      )"; then
+        echo "Failed to build the payload entry for ${filename}" >&2
+        return 1
+      fi
     else
-      diff_tmp="$(mktemp)"
-      git diff -M "$range" -- "${pathspecs[@]}" > "$diff_tmp"
-      file_obj="$(
+      if ! diff_tmp="$(mktemp)"; then
+        echo "Failed to create a temp file for the patch of ${filename}" >&2
+        return 1
+      fi
+      if ! git diff -M "$range" -- "${pathspecs[@]}" > "$diff_tmp"; then
+        rm -f "$diff_tmp"
+        echo "Failed to write the patch of ${filename}" >&2
+        return 1
+      fi
+      if ! file_obj="$(
         head -c "$MAX_PATCH_BYTES" "$diff_tmp" | jq -R -s -c \
           --arg filename "$filename" --arg status "$status_word" \
           --argjson additions "$additions_num" --argjson deletions "$deletions_num" \
           '{filename: $filename, status: $status, additions: $additions, deletions: $deletions, patch: .}'
-      )"
+      )"; then
+        rm -f "$diff_tmp"
+        echo "Failed to build the payload entry for ${filename}" >&2
+        return 1
+      fi
       rm -f "$diff_tmp"
     fi
     file_objs+=("$file_obj")
