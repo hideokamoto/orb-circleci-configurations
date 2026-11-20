@@ -325,7 +325,7 @@ teardown() {
   [ "$status" -eq 0 ]
 
   grep -q -- '--failure-reason=explicit reason' "$CLI_CALL_LOG"
-  ! grep -q -- '--failure-reason=should not be used' "$CLI_CALL_LOG"
+  ! grep -q -- '--failure-reason=should not be used' "$CLI_CALL_LOG" || false
 }
 
 @test "deploy_marker_update truncates the failure reason to 500 characters" {
@@ -352,7 +352,7 @@ teardown() {
   run deploy_marker_update
   [ "$status" -eq 0 ]
 
-  ! grep -q -- '--failure-reason' "$CLI_CALL_LOG"
+  ! grep -q -- '--failure-reason' "$CLI_CALL_LOG" || false
 }
 
 @test "deploy_marker_update fails PARAM_STATUS is missing" {
@@ -411,7 +411,7 @@ teardown() {
 
   run deploy_marker_update
   [ "$status" -ne 0 ]
-  ! echo "$output" | grep -q "already resolved or not found"
+  ! echo "$output" | grep -q "already resolved or not found" || false
 }
 
 @test "deploy_marker_update propagates a connectivity failure even when tolerate_missing is true" {
@@ -424,7 +424,7 @@ teardown() {
 
   run deploy_marker_update
   [ "$status" -ne 0 ]
-  ! echo "$output" | grep -q "already resolved or not found"
+  ! echo "$output" | grep -q "already resolved or not found" || false
 }
 
 @test "deploy_marker_update propagates a bad-request failure even when tolerate_missing is true" {
@@ -437,7 +437,7 @@ teardown() {
 
   run deploy_marker_update
   [ "$status" -ne 0 ]
-  ! echo "$output" | grep -q "already resolved or not found"
+  ! echo "$output" | grep -q "already resolved or not found" || false
 }
 
 @test "deploy_marker_update propagates a failure with no CLI output even when tolerate_missing is true" {
@@ -449,7 +449,7 @@ teardown() {
 
   run deploy_marker_update
   [ "$status" -ne 0 ]
-  ! echo "$output" | grep -q "already resolved or not found"
+  ! echo "$output" | grep -q "already resolved or not found" || false
 }
 
 # --- main() dispatch ---------------------------------------------------------
