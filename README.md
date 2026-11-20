@@ -49,6 +49,7 @@ the map, not the spec.
 | command | `install_cdkd` | Installs a version-pinned cdkd CLI. |
 | command | `create_github_release` | Idempotently creates a GitHub Release for the deploy tag resolved by `resolve_deploy_tag`. |
 | command | `resolve_previous_deploy_tag` | Resolves the release tag before the current one from the commit graph. |
+| command | `generate_release_notes_from_deploy_diff` | Installs the standalone CircleCI CLI (sha256-pinned), then generates release notes from CircleCI Deploy Diff Summaries, falling back to `gh release create --generate-notes`. |
 | command | `skip_unless_changed` | Halts the job based on the paths changed between the base and head revisions, per `mode` and `pattern`: by default (`skip_if_only_matches`) it halts when every changed path matches `pattern` (e.g. docs-only changes); `skip_unless_matches` halts when no changed path matches. |
 | job | `dependency_audit` | Runs `audit_deps`, then on failure `chunk_audit_fix` and a Slack notification. |
 
