@@ -51,6 +51,8 @@ the map, not the spec.
 | command | `resolve_previous_deploy_tag` | Resolves the release tag before the current one from the commit graph. |
 | command | `generate_release_notes_from_deploy_diff` | Installs the standalone CircleCI CLI (sha256-pinned), then generates release notes from CircleCI Deploy Diff Summaries, falling back to `gh release create --generate-notes`. |
 | command | `npm_publish_oidc` | Publishes an npm package via npm Trusted Publishing (OIDC), without a long-lived npm token. |
+| command | `deploy_marker_update` | Updates a CircleCI Deploys release marker's status (used by `with_deploy_marker`, or standalone). |
+| command | `with_deploy_marker` | Wraps deployment steps in a CircleCI Deploys release marker (plan, RUNNING, then SUCCESS or FAILED). |
 | job | `dependency_audit` | Runs `audit_deps`, then on failure `chunk_audit_fix` and a Slack notification. |
 
 Both executors pin their Docker image by digest rather than by a mutable tag
