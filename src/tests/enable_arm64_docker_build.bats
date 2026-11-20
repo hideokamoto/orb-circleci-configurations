@@ -176,7 +176,7 @@ teardown() {
   # would pass even if the shim script were broken.
   build_line="$(grep '^docker buildx build --load --platform linux/arm64 -t cdk-arm64-smoke:' "${CALL_LOG}")"
   [ -n "${build_line}" ]
-  ! grep -q "^docker build --platform linux/arm64 -t cdk-arm64-smoke:" "${CALL_LOG}"
+  ! grep -q "^docker build --platform linux/arm64 -t cdk-arm64-smoke:" "${CALL_LOG}" || false
 
   # The tag is derived from the smoke_dir basename
   # (cdk-arm64-smoke:tmp.XXXXXXXXXX), not the fixed `cdk-arm64-smoke`
@@ -197,9 +197,9 @@ teardown() {
   run bash "${SCRIPT}"
   [ "$status" -eq 0 ]
 
-  ! grep -q "^docker buildx build --load --platform linux/arm64 -t cdk-arm64-smoke:" "${CALL_LOG}"
-  ! grep -q "^docker build --platform linux/arm64 -t cdk-arm64-smoke:" "${CALL_LOG}"
-  ! grep -q "^docker rmi cdk-arm64-smoke:" "${CALL_LOG}"
+  ! grep -q "^docker buildx build --load --platform linux/arm64 -t cdk-arm64-smoke:" "${CALL_LOG}" || false
+  ! grep -q "^docker build --platform linux/arm64 -t cdk-arm64-smoke:" "${CALL_LOG}" || false
+  ! grep -q "^docker rmi cdk-arm64-smoke:" "${CALL_LOG}" || false
 
   # The shim itself is still installed regardless of smoke_test.
   grep -qx 'export CDK_DOCKER=/tmp/cdk-docker' "${BASH_ENV}"
@@ -224,7 +224,7 @@ EOF
   [[ "$output" == *"arm64 emulation check failed"* ]]
 
   # Must fail before touching buildx.
-  ! grep -q "buildx" "${CALL_LOG}"
+  ! grep -q "buildx" "${CALL_LOG}" || false
 }
 
 @test "resolves image parameters through circleci env subst" {
