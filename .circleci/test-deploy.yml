@@ -220,6 +220,24 @@ jobs:
       - checkout
       - configurations/npm_publish_oidc:
           publish_command: "echo publish-called"
+  # Exercises with_deploy_marker end to end: plan -> RUNNING -> steps ->
+  # SUCCESS against a real "orb-test" component in the "ci-validation"
+  # environment. This does create a real deploy marker in this orb repo's
+  # own CircleCI Deploys history, same as the source repo's own CI does for
+  # its production deploys -- there is no side-effect-free way to exercise
+  # `circleci run release ...` itself, so the wrapped step is a harmless
+  # echo instead of a real deployment.
+  test_with_deploy_marker:
+    executor: configurations/base_pinned
+    steps:
+      - checkout
+      - configurations/with_deploy_marker:
+          environment_name: ci-validation
+          component_name: orb-test
+          steps:
+            - run:
+                name: Simulated deploy
+                command: echo "deploying orb-test to ci-validation"
   # Exercises configurations/resolve_deploy_tag end to end against a local git
   # fixture repo (its own bare "origin" remote, never a real one), so
   # `git fetch --tags --force origin` and `git tag --points-at` run for real
@@ -301,6 +319,8 @@ workflows:
           filters: *filters
       - test_resolve_deploy_tag_halts_without_tag:
           filters: *filters
+      - test_with_deploy_marker:
+          filters: *filters
       - test_npm_publish_oidc:
           context: circleci
           filters: *filters
@@ -334,6 +354,7 @@ workflows:
             - test_create_github_release
             - test_resolve_previous_deploy_tag
             - test_generate_release_notes_from_deploy_diff
+            - test_with_deploy_marker
             - test_resolve_deploy_tag
             - test_resolve_deploy_tag_halts_without_tag
             - test_npm_publish_oidc
