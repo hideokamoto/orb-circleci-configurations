@@ -1,0 +1,40 @@
+# Release pipeline (circleci-infra: trigger default-branch-pushes only).
+#
+# Pull requests never run this file; they run .circleci/config.yml, which
+# continues with .circleci/test-deploy.yml and publishes a dev orb. This file
+# repeats the same lint/pack/review/shellcheck/bats gate, then continues with
+# a config built from test-deploy.yml's integration tests plus the release job
+# (see .circleci/release-workflow.yml), so every test that gates a dev orb also
+# gates the production release.
+version: 2.1
+setup: true
+orbs:
+  orb-tools: circleci/orb-tools@12.3
+  shellcheck: circleci/shellcheck@3.2
+  bats: circleci/bats@1.1.0
+
+workflows:
+  release:
+    jobs:
+      - orb-tools/lint
+      - orb-tools/pack
+      - orb-tools/review:
+          orb_name: configurations
+      - shellcheck/check
+      - bats/run:
+          path: src/tests
+      - orb-tools/continue:
+          pipeline_number: << pipeline.number >>
+          vcs_type: << pipeline.project.type >>
+          orb_name: configurations
+          # Build the continuation config before the job injects the packed
+          # orb into it. The job's own checkout is replaced by the one here,
+          # since pre-steps run before the job's steps.
+          checkout: false
+          pre-steps:
+            - checkout
+            - run:
+                name: Build the release continuation config
+                command: bash .circleci/scripts/build-release-config.sh /tmp/release-deploy.yml
+          config_path: /tmp/release-deploy.yml
+          requires: [orb-tools/lint, orb-tools/pack, orb-tools/review, shellcheck/check, bats/run]
