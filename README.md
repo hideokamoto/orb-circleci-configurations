@@ -46,6 +46,7 @@ the map, not the spec.
 | executor | `trivy` | Digest-pinned `aquasec/trivy` image for SBOM generation and vulnerability scanning. |
 | command | `audit_deps` | Detects the checkout's package manager (pnpm/npm) and runs its security audit. |
 | command | `chunk_audit_fix` | Asks CircleCI's Chunk agent to open a `fix(deps):` PR after a failed dependency audit. |
+| command | `install_cdkd` | Installs a version-pinned cdkd CLI. |
 | command | `push_deploy_tag` | Pushes a date-stamped release tag for the deployed commit (default UTC `YYYY.MM.DD-<sha7>`), skipping if it already exists. If you override `date_format` / `sha_length`, keep `skip_unless_changed`'s `deploy_tag_glob` and the `tag_regex` of `resolve_deploy_tag` / `resolve_previous_deploy_tag` in sync. |
 | job | `dependency_audit` | Runs `audit_deps`, then on failure `chunk_audit_fix` and a Slack notification. |
 
