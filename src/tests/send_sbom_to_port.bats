@@ -159,6 +159,30 @@ teardown() {
     [[ "$output" == *"--data-binary"*"@${WORK_DIR}/custom-sbom.cdx.json"* ]]
 }
 
+@test "uses a literal sbom_file without the CircleCI CLI (absent from the trivy image)" {
+    export TEST_WEBHOOK_URL="https://ingest.example.invalid/webhook/abc"
+    export PARAM_SBOM_FILE="${WORK_DIR}/literal-sbom.cdx.json"
+    export CIRCLECI_CLI="${STUB_DIR}/no-such-circleci"
+
+    PATH="${STUB_DIR}:${PATH}" run "${SCRIPT}"
+
+    [ "$status" -eq 0 ]
+    run cat "${CURL_CALLS}"
+    [[ "$output" == *"--data-binary"*"@${WORK_DIR}/literal-sbom.cdx.json"* ]]
+}
+
+@test "fails fast when sbom_file needs expansion but the CircleCI CLI is absent" {
+    export TEST_WEBHOOK_URL="https://ingest.example.invalid/webhook/abc"
+    export PARAM_SBOM_FILE='$CUSTOM_SBOM_PATH'
+    export CIRCLECI_CLI="${STUB_DIR}/no-such-circleci"
+
+    PATH="${STUB_DIR}:${PATH}" run "${SCRIPT}"
+
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"references an environment variable"* ]]
+    [ ! -f "${CURL_CALLS}" ]
+}
+
 @test "installs curl via apk when curl is not already on PATH" {
     export TEST_WEBHOOK_URL="https://ingest.example.invalid/webhook/abc"
     rm -f "${STUB_DIR}/curl"

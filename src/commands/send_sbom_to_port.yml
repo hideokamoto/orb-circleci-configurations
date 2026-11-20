@@ -33,8 +33,10 @@ parameters:
       Path to the CycloneDX SBOM JSON file to send as the request body
       (via curl --data-binary @<file>). May reference other environment
       variables (e.g. "$SBOM_DIR/sbom.cdx.json"); they are expanded with
-      `circleci env subst` (invoked via the CircleCI CLI's fixed install
-      path, not bare `circleci`, since it isn't reliably on PATH).
+      `circleci env subst` via /usr/bin/circleci. That CLI is not present in
+      the aquasec/trivy image, so on the trivy executor pass a literal path
+      (the default is literal): a value containing `$` fails fast there
+      instead of POSTing an unexpanded path.
   retries:
     type: integer
     default: 3

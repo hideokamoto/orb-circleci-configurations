@@ -1,11 +1,11 @@
 #!/bin/sh
 set -eu
 
-# cimg/base (and other job images) don't reliably put `circleci` on PATH —
-# the CLI is provided at a fixed path. Call it via this variable rather
-# than bare `circleci` so the command works regardless of PATH, and so
-# BATS can redirect it to a stub. Override with $CIRCLECI_CLI for images
-# that install it elsewhere.
+# The CircleCI CLI (only needed to expand $VAR references in sbom_file) is
+# at /usr/bin/circleci on cimg images but absent from the alpine
+# aquasec/trivy image this command targets, so it is only invoked when
+# sbom_file actually contains a `$`. Override with $CIRCLECI_CLI for images
+# that install it elsewhere; BATS also uses this to point at a stub.
 CIRCLECI_CLI="${CIRCLECI_CLI:-/usr/bin/circleci}"
 
 # send_sbom_to_port
@@ -31,8 +31,9 @@ CIRCLECI_CLI="${CIRCLECI_CLI:-/usr/bin/circleci}"
 #
 # Returns / side effects:
 #   Exits 1, after printing an error to stderr, when the environment
-#   variable named by PARAM_WEBHOOK_URL_ENV is unset or empty. On the
-#   success path, installs curl via `apk add --no-cache curl` if it is
+#   variable named by PARAM_WEBHOOK_URL_ENV is unset or empty, or when
+#   PARAM_SBOM_FILE references an environment variable but $CIRCLECI_CLI is
+#   not available to expand it. On the success path, installs curl via `apk add --no-cache curl` if it is
 #   missing from PATH, issues one HTTP POST of the SBOM file, and
 #   returns curl's exit status.
 send_sbom_to_port() {
@@ -52,7 +53,22 @@ send_sbom_to_port() {
         exit 1
     fi
 
-    sbom_file="$("${CIRCLECI_CLI}" env subst "${PARAM_SBOM_FILE}")"
+    # Only call the CLI when there is something to expand: it does not exist
+    # in the aquasec/trivy image, and a literal path needs no expansion.
+    # Refuse (rather than silently POST the unexpanded "$VAR/..." path) when
+    # expansion is needed but impossible.
+    case "${PARAM_SBOM_FILE}" in
+        *'$'*)
+            if [ ! -x "${CIRCLECI_CLI}" ]; then
+                echo "sbom_file \"${PARAM_SBOM_FILE}\" references an environment variable, but ${CIRCLECI_CLI} (needed for \`circleci env subst\`) is not available in this container; pass a literal path instead." >&2
+                exit 1
+            fi
+            sbom_file="$("${CIRCLECI_CLI}" env subst "${PARAM_SBOM_FILE}")"
+            ;;
+        *)
+            sbom_file="${PARAM_SBOM_FILE}"
+            ;;
+    esac
 
     # trivy's aquasec/trivy image is alpine-based and doesn't ship curl.
     command -v curl >/dev/null 2>&1 || apk add --no-cache curl
