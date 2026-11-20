@@ -53,6 +53,7 @@ the map, not the spec.
 | command | `npm_publish_oidc` | Publishes an npm package via npm Trusted Publishing (OIDC), without a long-lived npm token. |
 | command | `deploy_marker_update` | Updates a CircleCI Deploys release marker's status (used by `with_deploy_marker`, or standalone). |
 | command | `with_deploy_marker` | Wraps deployment steps in a CircleCI Deploys release marker (plan, RUNNING, then SUCCESS or FAILED). |
+| command | `skip_unless_changed` | Halts the job based on the paths changed between the base and head revisions, per `mode` and `pattern`: by default (`skip_if_only_matches`) it halts when every changed path matches `pattern` (e.g. docs-only changes); `skip_unless_matches` halts when no changed path matches. |
 | job | `dependency_audit` | Runs `audit_deps`, then on failure `chunk_audit_fix` and a Slack notification. |
 
 Both executors pin their Docker image by digest rather than by a mutable tag
