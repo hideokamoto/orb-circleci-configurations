@@ -14,9 +14,9 @@ filters: &filters
   tags:
     only: /.*/
 
-# Single source of truth for the cdkd version exercised by
-# test_install_cdkd. Keep this in sync with the install_cdkd command's
-# default `version` parameter (src/commands/install_cdkd.yml).
+# The cdkd version test_install_cdkd expects the install_cdkd command to
+# install by default. It must equal the command's default `version`
+# parameter (src/commands/install_cdkd.yml); the test fails if they drift.
 cdkd-test-version: &cdkd_test_version "0.280.15"
 
 jobs:
@@ -157,15 +157,16 @@ jobs:
             set -euo pipefail
             "${HOME}/release-tools/node_modules/.bin/semantic-release"
   # Command-test for install_cdkd: run it with its default (pinned) version
-  # and assert `cdkd --version` reports exactly that version (not merely a
-  # prefix of it — "0.280.150" must fail this check).
+  # -- no `version` override, so a change to the command's default that is
+  # not mirrored in cdkd_test_version fails here -- and assert
+  # `cdkd --version` reports exactly that version (not merely a prefix of
+  # it — "0.280.150" must fail this check).
   test_install_cdkd:
     executor:
       name: node/default
       tag: "22.14"
     steps:
-      - configurations/install_cdkd:
-          version: *cdkd_test_version
+      - configurations/install_cdkd
       - run:
           name: Assert cdkd --version reports exactly the pinned version
           environment:
