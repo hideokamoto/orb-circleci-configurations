@@ -503,7 +503,7 @@ STUB
   run bash "$PAYLOAD_SCRIPT"
   [ "$status" -eq 0 ]
   [ "$(cat "$SEEN_TOKEN_FILE")" = "custom-tok-value" ]
-  ! grep -q 'RELEASE_NOTES_SOURCE' "$BASH_ENV"
+  ! grep -q 'RELEASE_NOTES_SOURCE' "$BASH_ENV" || false
 }
 
 @test "fetch main re-resolves the token under CIRCLE_TOKEN from circle_token_env before polling (finding A)" {
@@ -564,7 +564,7 @@ STUB
 
   run bash "$PAYLOAD_SCRIPT"
   [ "$status" -eq 0 ]
-  ! grep -q 'RELEASE_NOTES_SOURCE' "$BASH_ENV"
+  ! grep -q 'RELEASE_NOTES_SOURCE' "$BASH_ENV" || false
   grep -q "export DEPLOY_DIFF_PAYLOAD_FILE=\"${PAYLOAD_FILE}\"" "$BASH_ENV"
   [ -f "$PAYLOAD_FILE" ]
   [ "$(jq -r '.org_id' "$PAYLOAD_FILE")" = "org-abc" ]
