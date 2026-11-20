@@ -1,0 +1,117 @@
+# Release-only additions to .circleci/test-deploy.yml.
+#
+# The release pipeline (circleci-infra: pushes to main) runs
+# .circleci/release.yml, whose orb-tools/continue step continues with the
+# config built by .circleci/scripts/build-release-config.sh:
+#   - orbs, jobs and top-level keys of test-deploy.yml (the single definition
+#     of the integration tests),
+#   - plus the jobs below,
+#   - with test-deploy.yml's workflow replaced by a `release` workflow: every
+#     entry of the test-deploy workflow except its orb-tools/publish (dev
+#     orb) entries, followed by the release job, which requires all of them.
+# So a test job added to test-deploy.yml gates the release without being
+# listed here.
+
+# Workflow parameters of the release job entry. `requires` is generated.
+release_invocation:
+  context:
+    - circleci
+    - github
+  serial-group: << pipeline.project.slug >>/release
+
+jobs:
+  # Production release, run only by the release pipeline (pushes to main).
+  # Nothing has to push a tag or create a GitHub Release to trigger it, so a
+  # merge made by a person or by an AI coding agent releases the same way.
+  # Mirrors the semantic-release flow in circleci-configurations'
+  # workflows/publish/*-semantic-release.yaml, with `circleci orb publish` in
+  # place of npm publish (see .releaserc.json):
+  #   1. Next version from the Conventional Commits since the last v* tag
+  #      (feat -> minor, fix/perf -> patch). While the orb is 0.x, `!` /
+  #      BREAKING CHANGE also bumps minor (releaseRules in .releaserc.json).
+  #      docs/chore/ci/test/refactor-only merges release nothing.
+  #   2. verifyConditions (before anything is created): the packed orb is
+  #      present and valid, CIRCLE_TOKEN is set, and GITHUB_TOKEN can push.
+  #   3. prepare: publish hideokamoto/configurations@<version> to the orb
+  #      registry. Done before the tag on purpose: if publishing fails, no
+  #      tag exists yet, so re-running the job retries the same version.
+  #   4. Push the v<version> tag, then create the GitHub Release (a record of
+  #      what was published; neither triggers anything).
+  release:
+    docker:
+      # Node 24 satisfies semantic-release 25's engine requirement.
+      - image: cimg/node:24.22
+    resource_class: medium
+    steps:
+      - checkout
+      - attach_workspace:
+          at: dist
+      - run:
+          name: Check prerequisites
+          command: |
+            set -euo pipefail
+            if [ -z "${GITHUB_TOKEN:-}" ]; then
+              echo "GITHUB_TOKEN is required in the github context." >&2
+              exit 1
+            fi
+            if [ -z "${CIRCLE_TOKEN:-}" ]; then
+              echo "CIRCLE_TOKEN (orb publishing) is required in the circleci context." >&2
+              exit 1
+            fi
+            # semantic-release finds the previous release from tags.
+            git fetch --tags origin
+      - run:
+          name: Bootstrap the 0.x baseline (first release only)
+          command: |
+            set -euo pipefail
+            # semantic-release hard-codes 1.0.0 as the first release. The orb
+            # is pre-GA, so when no v* tag exists yet, mark the commit before
+            # this merge as v0.0.0: the merge is then analyzed on its own and
+            # the first release becomes 0.1.0. semantic-release pushes this
+            # tag together with v0.1.0; later runs find the v0.x tags and skip
+            # this step.
+            if [ -z "$(git tag -l 'v*')" ]; then
+              git tag v0.0.0 HEAD^
+              echo "No v* tag yet: tagged HEAD^ as v0.0.0 (0.x baseline)."
+            fi
+      - run:
+          name: Unpack the tested orb from orb-tools/pack
+          command: |
+            set -euo pipefail
+            # orb-tools/pack persists dist/ as a single tarball.
+            tar -xzf dist/orb_source.tar.gz -C dist
+            rm dist/orb_source.tar.gz
+            test -s dist/orb.yml
+      - run:
+          name: Install the standalone CircleCI CLI (sha256-pinned)
+          command: |
+            set -euo pipefail
+            # /usr/bin/circleci on cimg images is the build-agent binary, which
+            # has no `orb publish`. Same pinned release as this orb's
+            # install_circleci_cli command; installed ahead of /usr/bin on PATH.
+            version="1.0.49308"
+            sha256="1beeaddd7f5652612bfd9a8a0a303bb966fb69a355d7bb9d036d537f8f9e8b17"
+            tmp_dir="$(mktemp -d)"
+            curl -fLSs --connect-timeout 10 --max-time 120 -o "${tmp_dir}/cli.tar.gz" \
+              "https://github.com/CircleCI-Public/circleci-cli/releases/download/v${version}/circleci-cli_${version}_linux_amd64.tar.gz"
+            echo "${sha256}  ${tmp_dir}/cli.tar.gz" | sha256sum -c -
+            tar -xzf "${tmp_dir}/cli.tar.gz" -C "${tmp_dir}" circleci
+            sudo install -m 0755 "${tmp_dir}/circleci" /usr/local/bin/circleci
+            rm -rf "${tmp_dir}"
+            circleci version
+      - run:
+          name: Install release tools (without lifecycle scripts)
+          command: |
+            set -euo pipefail
+            # Pinned: these tools receive a contents:write token and the orb
+            # publishing token. Versions match circleci-configurations'
+            # semantic-release templates, plus @semantic-release/exec.
+            npm install --prefix "${HOME}/release-tools" --ignore-scripts --no-audit --no-fund \
+              semantic-release@25.0.9 \
+              conventional-changelog-conventionalcommits@9.3.1 \
+              @semantic-release/exec@7.1.0
+      - run:
+          name: Release with semantic-release
+          command: |
+            set -euo pipefail
+            "${HOME}/release-tools/node_modules/.bin/semantic-release"
