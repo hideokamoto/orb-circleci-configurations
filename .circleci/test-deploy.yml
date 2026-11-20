@@ -206,6 +206,20 @@ jobs:
       - run:
           name: Assert the command installed the standalone CircleCI CLI
           command: circleci api --help >/dev/null
+  # Exercises npm_publish_oidc end-to-end with a real (unstubbed) OIDC token
+  # request, without ever calling the real `npm publish`: publish_command is
+  # overridden to a harmless echo so no package is actually published.
+  # CircleCI only mints OIDC tokens for jobs that use a context, so the
+  # workflow entry runs this job with the `circleci` context; without one the
+  # command's fail-fast path would exit 1 and block every publish job that
+  # requires this test. The empty-token and publish_command paths are
+  # covered deterministically by src/tests/npm_publish_oidc.bats.
+  test_npm_publish_oidc:
+    executor: configurations/base_pinned
+    steps:
+      - checkout
+      - configurations/npm_publish_oidc:
+          publish_command: "echo publish-called"
   test_push_deploy_tag:
     # Exercises the push_deploy_tag command against a throwaway local bare
     # git remote (never a real upstream), covering both the "no tag yet"
@@ -264,6 +278,9 @@ workflows:
           filters: *filters
       - test_push_deploy_tag:
           filters: *filters
+      - test_npm_publish_oidc:
+          context: circleci
+          filters: *filters
       - test_generate_release_notes_from_deploy_diff:
           filters: *filters
       - test_resolve_previous_deploy_tag:
@@ -295,5 +312,6 @@ workflows:
             - test_resolve_previous_deploy_tag
             - test_generate_release_notes_from_deploy_diff
             - test_push_deploy_tag
+            - test_npm_publish_oidc
           context: circleci
           filters: *filters
