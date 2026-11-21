@@ -90,6 +90,10 @@ main() {
     # entry including the last, so this fixes that false negative without
     # changing anything else about the walk.
     #
+    # Tags are matched against the whole name (grep -x), as
+    # resolve_deploy_tag does, so a tag that merely contains a match is not
+    # taken as a release tag.
+    #
     # The release commit itself is skipped: when it carries more than one
     # deploy tag (a "Rerun workflow from start" on a later day pushes a
     # second date-stamped tag onto the same commit,
@@ -102,7 +106,7 @@ main() {
                 continue
             fi
             git tag --points-at "${sha}" \
-                | grep -E -- "${tag_regex}" \
+                | grep -Ex -- "${tag_regex}" \
                 | grep -v -F -x "${release_tag}"
         done | head -n1 || true)"
 
