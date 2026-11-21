@@ -113,11 +113,19 @@ bats src/tests
 
 # Lint YAML style
 yamllint -c .yamllint src .circleci
+
+# Check that boolean parameters passed to scripts are tested with "1"
+bash .circleci/scripts/check-bool-env-tests.sh
 ```
 
 `.circleci/config.yml` runs the equivalent checks (`orb-tools/lint`,
-`orb-tools/pack`, `orb-tools/review`, `shellcheck/check`, `bats/run`) on every
-push. `.circleci/test-deploy.yml` is injected with the packed orb and runs
+`orb-tools/pack`, `orb-tools/review`, `shellcheck/check`, `bats/run`,
+`check-bool-env-tests`) on every push.
+
+A boolean parameter placed in a run step's `environment:` reaches the script
+as `"1"` / `"0"`, not `"true"` / `"false"`, so scripts accept both forms
+(`case ... in 1 | true)`). `check-bool-env-tests` fails when such a parameter
+has no BATS test in `src/tests/<script>.bats` that sets it to `"1"`. `.circleci/test-deploy.yml` is injected with the packed orb and runs
 integration-style jobs against real orb components (see
 `test_base_pinned_executor` / `test_trivy_executor`) before any dev or
 production publish.
