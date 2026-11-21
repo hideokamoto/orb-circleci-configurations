@@ -22,16 +22,17 @@ packages them as reusable orb commands, jobs, and executors. It covers:
   `gh --generate-notes` fallback), and creating the GitHub Release
   idempotently.
 - **AI-DLC config validation** — validating a repository's AI-DLC workflow
-  state as a CI job (planned; see below).
+  state as a CI job.
 
 Migration status (tracked in the [epic, #1](https://github.com/hideokamoto/orb-circleci-configurations/issues/1)):
 
 - **Released:** the digest-pinned executors, the Phase 1 commands, the
-  `dependency_audit` job, and the `github_release_from_deploy_tag` job (#25,
+  `dependency_audit` and `aidlc_validate` (#29) jobs, and the
+  `github_release_from_deploy_tag` job (#25,
   shipped ahead of the rest of Phase 4 because it needs no deploy
   credentials), all listed under [Current components](#current-components).
 - **Planned:** in the epic's order, the Phase 2 jobs that need no secrets
-  (#19 `node_test`, #20 `cdk_validate`, #29 `aidlc_validate`), then the
+  (#19 `node_test`, #20 `cdk_validate`), then the
   Phase 3 examples and `v1.0.0` (#31), then the Phase 4 deploy / publish
   jobs, released as minor versions after `v1.0.0` (#21–#24, #26–#28: CDK /
   cdkd / Cloudflare Workers deploy and cancel, npm release flows).
@@ -69,6 +70,7 @@ the map, not the spec.
 | command | `cdk_synth` | Runs `cdk synth` against a placeholder AWS account/region, so a validate job can synth without real AWS credentials. |
 | job | `dependency_audit` | Runs `audit_deps`, then on failure `chunk_audit_fix` and a Slack notification. |
 | job | `github_release_from_deploy_tag` | Creates a GitHub Release for the deploy tag on the current commit (`resolve_deploy_tag` → `gh/setup` → existing-release check → `resolve_previous_deploy_tag` → `generate_release_notes_from_deploy_diff` → `create_github_release`). Run it after the job that pushes the tag. |
+| job | `aidlc_validate` | Validates an embedded AI-DLC v2 harness (drift guards, scope/graph/output checks, Cursor rule, `doctor`), optionally only when `.claude/`, `.cursor/` or `aidlc/` changed. |
 
 Both executors pin their Docker image by digest rather than by a mutable tag
 (such as `:current`), so a given commit's CI behavior stays reproducible over

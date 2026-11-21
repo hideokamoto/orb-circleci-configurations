@@ -1,0 +1,158 @@
+description: >
+  Validate an AI-DLC v2 harness embedded in the checked-out repository, so a
+  customization that breaks the harness fails CI instead of the next
+  developer's session. The harness is detected from `.claude/tools` (Claude
+  Code) or `.cursor/tools` (Cursor); the job fails when neither exists.
+
+  Each check runs as its own step on purpose, including checks that
+  `aidlc-utility.ts doctor` also performs, so a failure names the exact
+  check that broke: drift guards (`aidlc-graph compile --check`,
+  `aidlc-runner-gen check`, `aidlc-runner-gen scopes --check`,
+  `aidlc-utility scope-table --check`), structure checks (`aidlc-graph
+  cycles`, `validate-scope` for every scope in `scopes`, the directive
+  contract self-check, `aidlc-validate outputs all`), the Cursor rule check
+  (v2 memory layout, with the legacy orchestration layout still accepted),
+  and `doctor` against an ephemeral copy of the harness. `validate-scope`
+  runs for every scope even after one fails, so a single run reports all
+  broken scopes.
+
+  bun is installed with `node/install-bun` from circleci/node, which runs
+  `npm install -g bun@<bun_version>`; that is why this job runs on
+  `node/default` instead of the orb's `base_pinned` executor. The bun
+  toolchain is not cached: it is installed from npm on every run.
+
+  Set `skip_unless_related: true` to halt the job (reported as success)
+  when no path matching `related_paths_pattern` changed. Pass
+  `<< pipeline.git.base_revision >>` as `base_revision`; when it resolves
+  empty (GitHub App pipelines), the parent commit (HEAD^1) is used, and
+  when the diff still cannot be determined the job runs (fail-safe). See
+  the `skip_unless_changed` command for the details and the known
+  weakness of the parent-commit fallback.
+
+executor:
+  name: node/default
+  tag: <<parameters.tag>>
+resource_class: <<parameters.resource_class>>
+
+parameters:
+  tag:
+    type: string
+    default: lts
+    description: >
+      cimg/node image tag for the node/default executor. Node is only needed
+      to install bun from npm (node/install-bun); the AI-DLC tools run on bun.
+  resource_class:
+    type: string
+    default: small
+    description: Resource class of the validation container.
+  checkout:
+    type: boolean
+    default: true
+    description: >
+      Check out the project first. Set to false when earlier steps (e.g.
+      `pre-steps` with `attach_workspace`) already put the repository in the
+      working directory.
+  skip_unless_related:
+    type: boolean
+    default: false
+    description: >
+      Halt the job (reported as success) unless at least one changed path
+      matches `related_paths_pattern`. Useful in a monorepo where most
+      changes do not touch the AI-DLC harness.
+  related_paths_pattern:
+    type: string
+    default: '^(\.claude/|\.cursor/|aidlc/)'
+    description: >
+      Extended regular expression (grep -E) matched against each changed
+      path when `skip_unless_related` is true. The default covers both
+      harness trees and the shared `aidlc/` memory directory.
+  base_revision:
+    type: string
+    default: ""
+    description: >
+      Revision to diff from when `skip_unless_related` is true. Pass
+      `<< pipeline.git.base_revision >>` from the consuming config. When
+      empty, the parent commit (HEAD^1) is used.
+  bun_version:
+    type: string
+    default: "1.3.14"
+    description: >
+      bun version installed with circleci/node's `install-bun` command.
+  expected_aidlc_version:
+    type: string
+    default: "aidlc 2.6.16"
+    description: >
+      The `aidlc-utility.ts version` output this job's checks were written
+      against. A different embedded version is reported in the log; it
+      fails the job only when `pin_version` is true.
+  pin_version:
+    type: boolean
+    default: false
+    description: >
+      Fail when the embedded AI-DLC version differs from
+      `expected_aidlc_version`. A project environment variable
+      AIDLC_PIN_VERSION=1 (the switch the pre-orb template used) also
+      enables pinning, so existing projects keep their behavior.
+  scopes:
+    type: string
+    default: "enterprise feature mvp poc bugfix refactor infra security-patch workshop"
+    description: >
+      Space-separated scope names passed one by one to
+      `aidlc-graph.ts validate-scope`.
+
+steps:
+  - when:
+      condition: <<parameters.checkout>>
+      steps:
+        - checkout
+  - when:
+      condition: <<parameters.skip_unless_related>>
+      steps:
+        - skip_unless_changed:
+            base_revision: <<parameters.base_revision>>
+            fallback: parent_commit
+            mode: skip_unless_matches
+            pattern: <<parameters.related_paths_pattern>>
+  - run:
+      name: Detect AI-DLC harness
+      command: <<include(scripts/aidlc_detect_harness.sh)>>
+  - node/install-bun:
+      version: <<parameters.bun_version>>
+  - run:
+      name: Report embedded AI-DLC version
+      environment:
+        PARAM_EXPECTED_VERSION: <<parameters.expected_aidlc_version>>
+        PARAM_PIN_VERSION: <<parameters.pin_version>>
+      command: <<include(scripts/aidlc_check_version.sh)>>
+  - run:
+      name: Stage graph compile drift
+      command: bun "$AIDLC_TOOLS/aidlc-graph.ts" compile --check
+  - run:
+      name: Stage-runner skill drift
+      command: bun "$AIDLC_TOOLS/aidlc-runner-gen.ts" check
+  - run:
+      name: Scope-runner skill drift
+      command: bun "$AIDLC_TOOLS/aidlc-runner-gen.ts" scopes --check
+  - run:
+      name: SKILL.md scope-table drift
+      command: bun "$AIDLC_TOOLS/aidlc-utility.ts" scope-table --check
+  - run:
+      name: Graph cycle check
+      command: bun "$AIDLC_TOOLS/aidlc-graph.ts" cycles
+  - run:
+      name: Validate all scopes
+      environment:
+        PARAM_SCOPES: <<parameters.scopes>>
+      command: <<include(scripts/aidlc_validate_scopes.sh)>>
+  - run:
+      name: Directive contract self-check
+      command: bun "$AIDLC_TOOLS/aidlc-directive.ts"
+  - run:
+      name: Stage outputs cross-reference
+      command: bun "$AIDLC_TOOLS/aidlc-validate.ts" outputs all
+  - run:
+      name: Cursor harness rule check
+      command: <<include(scripts/aidlc_check_cursor_rule.sh)>>
+  - run:
+      name: AI-DLC doctor (ephemeral workspace)
+      command: <<include(scripts/aidlc_doctor.sh)>>
