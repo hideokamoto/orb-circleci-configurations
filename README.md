@@ -4,8 +4,7 @@
 
 `hideokamoto/configurations` collects CI/CD building blocks that were previously
 duplicated across several projects' CircleCI Config Source YAML files, and
-packages them as reusable orb commands, jobs, and executors. Once published,
-it will provide:
+packages them as reusable orb commands, jobs, and executors. It covers:
 
 - **Deploy markers** — wrapping a deployment's steps with `circleci run
   release` plan / start / success / failure updates, so CircleCI Deploys
@@ -17,21 +16,30 @@ it will provide:
 - **npm publish over OIDC** — publishing packages without a long-lived npm
   token, using CircleCI's OIDC identity federation.
 - **AWS CDK and Cloudflare Workers deploy jobs** — parameterized deploy /
-  cancel jobs for both targets, including an arm64 Docker Buildx variant for
-  CDK.
+  cancel jobs for both targets (planned; see below).
 - **GitHub Release automation** — resolving the deploy tag for a commit,
   generating release notes from CircleCI Deploy Diff Summaries (with a
   `gh --generate-notes` fallback), and creating the GitHub Release
   idempotently.
 - **AI-DLC config validation** — validating a repository's AI-DLC workflow
-  state as a CI job.
-- **SBOM generation** — producing a CycloneDX SBOM with Trivy and forwarding
-  it to a webhook (e.g. Port).
+  state as a CI job (planned; see below).
 
-This repository is in **Phase 0** of its migration: besides the digest-pinned
-base executors, a dependency-audit command/job has also landed early. The
-rest of the items listed above land in later phases (tracked in this repo's
-issues) and this README's component list will grow to match as they ship.
+Migration status (tracked in the [epic, #1](https://github.com/hideokamoto/orb-circleci-configurations/issues/1)):
+
+- **Released:** the digest-pinned executors, the Phase 1 commands, and the
+  `dependency_audit` job, all listed under [Current components](#current-components).
+- **Planned:** in the epic's order, the Phase 2 jobs that need no secrets
+  (#19 `node_test`, #20 `cdk_validate`, #29 `aidlc_validate`), then the
+  Phase 3 examples and `v1.0.0` (#31), then the Phase 4 deploy / publish
+  jobs, released as minor versions after `v1.0.0` (#21–#28: CDK / cdkd /
+  Cloudflare Workers deploy and cancel, GitHub Release, npm release flows).
+  This README's component list grows to match as they ship.
+- **Not planned:** the arm64 Docker Buildx support for CDK (#7; the one
+  pipeline that uses the arm64 template keeps its Config Source steps), SBOM
+  generation and sending it to Port (#17, #30; no pipeline uses the SBOM
+  template), a bun install command (#12; use `circleci/node`'s
+  `install-bun`), and a skip-on-release-commit command (#16).
+
 Each component's own `description` (visible via `circleci orb info` and the
 orb registry) is the source of truth for its exact contract; this README is
 the map, not the spec.
