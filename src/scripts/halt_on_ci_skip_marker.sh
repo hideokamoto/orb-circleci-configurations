@@ -14,7 +14,10 @@ set -euo pipefail
 halt_on_ci_skip_marker() {
     local message
     message="$(git log -1 --pretty=%B)"
-    if printf '%s\n' "${message}" | grep -qE '\[skip ci\]|\[ci skip\]|circleci\[skip\]|circleci:skip'; then
+    # A here-string instead of `printf | grep -q`: under pipefail, grep -q
+    # exiting at the first match can SIGPIPE the writer of a long message
+    # and turn a match into a failed condition.
+    if grep -qE '\[skip ci\]|\[ci skip\]|circleci\[skip\]|circleci:skip' <<<"${message}"; then
         echo "Skip CI marker detected; skipping the rest of this job."
         circleci-agent step halt
     fi

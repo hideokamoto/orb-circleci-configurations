@@ -15,7 +15,14 @@ set -euo pipefail
 #
 # Arguments: $1 - the version string to check.
 is_exact_version() {
-  [[ "$1" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]
+  # Strict SemVer 2.0.0 (https://semver.org): no leading zeros in numeric
+  # identifiers and no empty prerelease / build identifiers. npm does not
+  # resolve anything else as an exact version.
+  local num='(0|[1-9][0-9]*)'
+  local pre='(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)'
+  local build='[0-9A-Za-z-]+'
+  local re="^${num}\\.${num}\\.${num}(-${pre}(\\.${pre})*)?(\\+${build}(\\.${build})*)?$"
+  [[ "$1" =~ ${re} ]]
 }
 
 # Succeeds when the value is "<package>@<exact version>", scoped or not.

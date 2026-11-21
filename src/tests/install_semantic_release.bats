@@ -83,3 +83,29 @@ teardown() {
   [ "$status" -eq 1 ]
   [ ! -s "${BASH_ENV}" ]
 }
+
+@test "rejects versions that are not valid SemVer before installing" {
+  # A regex that only checks the character set accepts these; npm does not
+  # resolve them as exact versions, so they must not count as pinned.
+  for v in "25.0.9-beta..1" "025.0.9" "25.0.9-.beta" "25.0.9-01" "25.0.9+"; do
+    : >"${NPM_LOG}"
+    export PARAM_SEMANTIC_RELEASE_VERSION="${v}"
+    run bash "${SCRIPT}"
+    [ "$status" -ne 0 ]
+    [ ! -s "${NPM_LOG}" ]
+  done
+}
+
+@test "rejects an extra package whose version is not valid SemVer" {
+  export PARAM_EXTRA_RELEASE_PACKAGES="multi-semantic-release@3.1.0-rc..1"
+  run bash "${SCRIPT}"
+  [ "$status" -ne 0 ]
+  [ ! -s "${NPM_LOG}" ]
+}
+
+@test "accepts SemVer prerelease and build metadata in extra packages" {
+  export PARAM_EXTRA_RELEASE_PACKAGES="multi-semantic-release@3.1.0-rc.1+build.5 @scope/pkg@0.0.0-0"
+  run bash "${SCRIPT}"
+  [ "$status" -eq 0 ]
+  grep -q 'multi-semantic-release@3.1.0-rc.1+build.5 @scope/pkg@0.0.0-0$' "${NPM_LOG}"
+}

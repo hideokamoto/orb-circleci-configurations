@@ -75,3 +75,20 @@ commit_with_message() {
     [ "$status" -eq 0 ]
     [ ! -f "${TEST_TMP}/agent_calls" ]
 }
+
+@test "a marker at the start of a message larger than a pipe buffer still halts" {
+    # With `printf | grep -q` under pipefail, grep exits at the first match
+    # and printf can get SIGPIPE, which made the pipeline (and the check)
+    # fail for long messages.
+    {
+        printf '[skip ci] long message\n\n'
+        head -c 300000 /dev/zero | tr '\0' 'a' | fold -w 100
+    } >"${TEST_TMP}/msg"
+    echo "$RANDOM" >>file.txt
+    git add file.txt
+    git commit -q -F "${TEST_TMP}/msg"
+    source "${SCRIPT}"
+    run main
+    [ "$status" -eq 0 ]
+    [ "$(cat "${TEST_TMP}/agent_calls")" = "step halt" ]
+}
