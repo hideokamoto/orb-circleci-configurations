@@ -73,8 +73,9 @@ main() {
 
     # Walk from the release commit toward its ancestors (git log's default
     # enumeration order guarantees a commit is listed before its ancestors).
-    # The first ancestor carrying a tag_regex-matching tag other than the
-    # release tag itself is the previous release. `|| true` absorbs the
+    # The first ancestor (excluding the release commit) carrying a
+    # tag_regex-matching tag other than the release tag itself is the
+    # previous release. `|| true` absorbs the
     # pipefail-driven non-zero status from the `while read` loop hitting EOF
     # when no match is found (see command description for detail).
     #
@@ -88,8 +89,18 @@ main() {
     # `tformat:` is otherwise identical but appends a newline after every
     # entry including the last, so this fixes that false negative without
     # changing anything else about the walk.
+    #
+    # The release commit itself is skipped: when it carries more than one
+    # deploy tag (a "Rerun workflow from start" on a later day pushes a
+    # second date-stamped tag onto the same commit,
+    # hideokamoto/circleci-configurations#94), its sibling tag is not a
+    # previous release, and taking it would make the release notes range
+    # empty.
     prev_tag="$(git log --pretty=tformat:'%H' "${release_commit}" \
         | while IFS= read -r sha; do
+            if [ "${sha}" = "${release_commit}" ]; then
+                continue
+            fi
             git tag --points-at "${sha}" \
                 | grep -E -- "${tag_regex}" \
                 | grep -v -F -x "${release_tag}"

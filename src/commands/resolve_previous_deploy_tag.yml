@@ -15,7 +15,10 @@ description: >
   which is a topological invariant unaffected by clock skew or same-second
   tags — and takes the first commit along that walk that carries a tag
   matching <<parameters.tag_regex>> other than the current release tag
-  itself.
+  itself. The release commit is skipped: a "Rerun workflow from start" on a
+  later day can push a second date-stamped tag onto the same commit, and
+  that sibling tag is not a previous release (it would make the release
+  notes range empty).
 
   Exports the previous tag (when one is found) to `$BASH_ENV` under
   <<parameters.output_env>>. On the very first release, no matching ancestor

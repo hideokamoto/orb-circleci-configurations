@@ -177,6 +177,59 @@ read_bash_env_var() {
     [ "$(read_bash_env_var PREV_RELEASE_TAG)" = "2026.08.01-c1c1c1c" ]
 }
 
+@test "release commit carrying a second deploy tag: the earlier-named one is not taken as the previous release (#94)" {
+    # A "Rerun workflow from start" on a later calendar day pushes a second
+    # date-stamped tag onto the same commit (hideokamoto/circleci-configurations#94).
+    # resolve_deploy_tag then picks the first tag by name, so RELEASE_TAG is
+    # the *older* tag and the newer one sits on the release commit too. The
+    # walk must skip the release commit itself; otherwise that sibling tag is
+    # reported as the previous release and the release notes range is empty.
+    make_commit "root" # untagged root ancestor; see file header note
+    make_commit "c1"
+    git tag "2026.09.20-1111111" # the true previous release
+    make_commit "c2"
+    git tag "2026.09.21-2222222" # first deploy of c2
+    git tag "2026.09.22-2222222" # rerun from start on the next day, same commit
+    export RELEASE_TAG="2026.09.21-2222222"
+
+    source "${SCRIPT}"
+    run main
+    [ "$status" -eq 0 ]
+
+    [ "$(read_bash_env_var PREV_RELEASE_TAG)" = "2026.09.20-1111111" ]
+}
+
+@test "release commit carrying a second deploy tag: the later-named one is not taken as the previous release (#94)" {
+    make_commit "root" # untagged root ancestor; see file header note
+    make_commit "c1"
+    git tag "2026.09.20-1111111" # the true previous release
+    make_commit "c2"
+    git tag "2026.09.21-2222222"
+    git tag "2026.09.22-2222222"
+    export RELEASE_TAG="2026.09.22-2222222"
+
+    source "${SCRIPT}"
+    run main
+    [ "$status" -eq 0 ]
+
+    [ "$(read_bash_env_var PREV_RELEASE_TAG)" = "2026.09.20-1111111" ]
+}
+
+@test "first release whose commit carries two deploy tags: nothing is exported (#94)" {
+    make_commit "root" # untagged root ancestor; see file header note
+    make_commit "c1"
+    git tag "2026.09.21-1111111"
+    git tag "2026.09.22-1111111"
+    export RELEASE_TAG="2026.09.21-1111111"
+
+    source "${SCRIPT}"
+    run main
+    [ "$status" -eq 0 ]
+
+    [ -z "$(read_bash_env_var PREV_RELEASE_TAG)" ]
+    [[ "$output" == *"no previous release tag found"* ]]
+}
+
 @test "first release: no matching ancestor tag, nothing is exported" {
     make_commit "c1"
     git tag "2026.05.01-abc0000"
