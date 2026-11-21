@@ -439,6 +439,26 @@ workflows:
       - test_npm_publish_oidc:
           context: circleci
           filters: *filters
+      # Runs the npm_semantic_release job end to end on a fixture package
+      # (.circleci/fixtures/npm-semantic-release, private, never published):
+      # skip-ci check, preflight, npm ci, build, pinned semantic-release
+      # install, then npm_publish_oidc with a release_command that only
+      # checks NPM_ID_TOKEN is set and that the pinned semantic-release
+      # starts. Nothing is released or published. The circleci context lets
+      # CircleCI mint the OIDC token (as for test_npm_publish_oidc);
+      # GITHUB_TOKEN is a dummy because no GitHub API is called.
+      - configurations/npm_semantic_release:
+          name: test_npm_semantic_release
+          context: circleci
+          app_dir: .circleci/fixtures/npm-semantic-release
+          pkg_manager: npm
+          resource_class: small
+          release_command: 'node -e "process.exit(process.env.NPM_ID_TOKEN ? 0 : 1)" && semantic-release --version'
+          pre-steps:
+            - run:
+                name: Set a dummy GITHUB_TOKEN for the preflight check
+                command: echo 'export GITHUB_TOKEN=test-dummy-not-a-token' >> "$BASH_ENV"
+          filters: *filters
       - test_generate_release_notes_from_deploy_diff:
           filters: *filters
       - test_resolve_previous_deploy_tag:
@@ -487,5 +507,6 @@ workflows:
             - test_push_deploy_tag
             - test_cdk_synth
             - test_npm_publish_oidc
+            - test_npm_semantic_release
           context: circleci
           filters: *filters

@@ -1,0 +1,32 @@
+description: >
+  Release an npm package on every merge to main with semantic-release and
+  publish it over npm Trusted Publishing (OIDC). The branch filter, contexts
+  and serial-group stay in the consuming workflow: orbs cannot carry them.
+  The github context supplies GITHUB_TOKEN (contents:write) for the tag push
+  and GitHub Release; npm-publish-guard is a restricted context that limits
+  who can publish and lets CircleCI mint the OIDC token.
+usage:
+  version: 2.1
+
+  orbs:
+    configurations: hideokamoto/configurations@x.y.z
+
+  workflows:
+    ci-cd:
+      jobs:
+        # Your own test job (lint / typecheck / build / test) goes here.
+        - configurations/npm_semantic_release:
+            context:
+              - npm-publish-guard
+              - github
+            filters:
+              branches:
+                only: main
+            # Serializes releases of this project so two merges cannot
+            # release at once.
+            serial-group: << pipeline.project.slug >>/release
+            # bun project (needs bun.lock):
+            # pkg_manager: bun
+            # pnpm workspace with multi-semantic-release:
+            # extra_release_packages: multi-semantic-release@3.1.0
+            # release_command: multi-semantic-release --ignore-private-packages --deps.prefix='^'
