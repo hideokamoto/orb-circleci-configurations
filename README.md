@@ -28,10 +28,12 @@ Migration status (tracked in the [epic, #1](https://github.com/hideokamoto/orb-c
 
 - **Released:** the digest-pinned executors, the Phase 1 commands, and the
   `dependency_audit` job, all listed under [Current components](#current-components).
-- **Planned:** the Phase 2 jobs (#19–#29: test, CDK / cdkd / Cloudflare
-  Workers deploy and cancel, GitHub Release, npm release flows, AI-DLC
-  validation) and the Phase 3 examples and `v1.0.0` (#31). This README's
-  component list grows to match as they ship.
+- **Planned:** in the epic's order, the Phase 2 jobs that need no secrets
+  (#19 `node_test`, #20 `cdk_validate`, #29 `aidlc_validate`), then the
+  Phase 3 examples and `v1.0.0` (#31), then the Phase 4 deploy / publish
+  jobs, released as minor versions after `v1.0.0` (#21–#28: CDK / cdkd /
+  Cloudflare Workers deploy and cancel, GitHub Release, npm release flows).
+  This README's component list grows to match as they ship.
 - **Not planned:** the arm64 Docker Buildx support for CDK (#7; the one
   pipeline that uses the arm64 template keeps its Config Source steps), SBOM
   generation and sending it to Port (#17, #30; no pipeline uses the SBOM
