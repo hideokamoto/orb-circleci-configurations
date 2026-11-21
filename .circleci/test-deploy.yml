@@ -447,6 +447,16 @@ workflows:
           filters: *filters
       - test_install_cdkd:
           filters: *filters
+      # Runs the github_release_from_deploy_tag job itself on this orb repo's
+      # own commit. The orb repo is tagged v<semver>, never YYYY.MM.DD-<sha7>,
+      # so resolve_deploy_tag finds no deploy tag and halts the job before
+      # gh/setup: no context or GitHub token is needed and no Release can be
+      # created. This proves the job compiles and starts on its default
+      # executor; the release path itself is covered by the command tests
+      # above and src/tests/halt_if_github_release_exists.bats.
+      - configurations/github_release_from_deploy_tag:
+          name: test_github_release_from_deploy_tag_halts_without_tag
+          filters: *filters
       # The orb must be re-packed for publishing, and saved to the workspace.
       - orb-tools/pack:
           filters: *filters
@@ -466,6 +476,7 @@ workflows:
             - test_trivy_executor
             - test_dependency_audit
             - test_install_cdkd
+            - test_github_release_from_deploy_tag_halts_without_tag
             - test_create_github_release
             - test_resolve_previous_deploy_tag
             - test_generate_release_notes_from_deploy_diff

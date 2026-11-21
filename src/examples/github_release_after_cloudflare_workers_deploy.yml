@@ -1,0 +1,60 @@
+description: >
+  Create a GitHub Release after a Cloudflare Workers production deploy. The
+  deploy job and the tag-release job stay in the consuming config (the deploy
+  job here uses with_deploy_marker); github_release_from_deploy_tag runs last
+  and only needs the deploy tag pushed by push_deploy_tag. Keep the branch
+  filter and the serial-group in the workflow: the orb job does not set them.
+usage:
+  version: 2.1
+
+  orbs:
+    configurations: hideokamoto/configurations@x.y.z
+    node: circleci/node@7.2.1
+    gh: circleci/github-cli@2.7.2
+
+  jobs:
+    deploy-production:
+      executor:
+        name: node/default
+        tag: "24.22"
+      steps:
+        - checkout
+        - configurations/skip_unless_changed:
+            base_revision: << pipeline.git.base_revision >>
+        - node/install-packages:
+            pkg-manager: pnpm
+        - configurations/with_deploy_marker:
+            steps:
+              - run:
+                  name: Deploy to Cloudflare Workers
+                  command: pnpm run deploy
+    # Kept separate from deploy-production so that a failure installing the
+    # GitHub CLI cannot fail the deploy (or mark its deploy marker FAILED).
+    tag-release:
+      executor: configurations/base_pinned
+      steps:
+        - checkout
+        - configurations/skip_unless_changed:
+            base_revision: << pipeline.git.base_revision >>
+        - gh/setup
+        - configurations/push_deploy_tag
+
+  workflows:
+    build-deploy:
+      jobs:
+        - deploy-production:
+            context: [cloudflare]
+            filters: {branches: {only: main}}
+            serial-group: << pipeline.project.slug >>/deploy-production
+        - tag-release:
+            context: [github]
+            requires: [deploy-production]
+            filters: {branches: {only: main}}
+        - configurations/github_release_from_deploy_tag:
+            name: create-github-release
+            # github: GITHUB_TOKEN (contents:write). circleci: CIRCLE_TOKEN for
+            # Deploy Diff Summaries (optional; falls back to gh --generate-notes).
+            context: [github, circleci]
+            requires: [tag-release]
+            filters: {branches: {only: main}}
+            serial-group: << pipeline.project.slug >>/create-github-release
