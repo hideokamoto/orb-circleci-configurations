@@ -1,0 +1,123 @@
+description: >
+  Create a GitHub Release for the deploy tag pushed to the current commit
+  ($CIRCLE_SHA1). The job depends only on "a deploy tag exists on this
+  commit", not on how the deploy ran, so the same job follows a Cloudflare
+  Workers, AWS CDK or cdkd deploy. Ported from the create-github-release job
+  of hideokamoto/circleci-configurations (workflows/deployment/
+  cloudflare-workers.yaml, aws-cdk.yaml, aws-cdkd.yaml).
+
+  Steps: checkout, resolve_deploy_tag (no matching tag -> the job halts as a
+  success, e.g. the deploy was skipped), gh/setup, an early "release already
+  exists" check (halts before any release-notes work), resolve_previous_deploy_tag,
+  generate_release_notes_from_deploy_diff (only when notes_source is
+  deploy_diff_summaries; it falls back to gh --generate-notes on any API
+  problem instead of failing), then create_github_release.
+
+  Run it after the job that pushes the deploy tag (push_deploy_tag), with a
+  context that provides the GitHub token (contents:write; GITHUB_TOKEN by
+  default) and, for Deploy Diff Summaries, a CircleCI personal API token
+  (CIRCLE_TOKEN by default). Keep branch filters and serial-group in the
+  consuming workflow; see the github_release_after_* usage examples.
+
+  Every step is idempotent, so "Rerun from failed" only retries this job and
+  never repeats the deploy.
+
+executor: << parameters.executor >>
+resource_class: << parameters.resource_class >>
+
+parameters:
+  executor:
+    type: executor
+    default: base_pinned
+    description: >
+      Executor to run on. Needs git, curl, jq, sha256sum and sudo (to install
+      the GitHub CLI and the standalone CircleCI CLI); the default
+      digest-pinned cimg/base image has them.
+  resource_class:
+    type: string
+    default: small
+    description: Resource class of the job container.
+  tag_regex:
+    type: string
+    default: '^[0-9]{4}\.[0-9]{2}\.[0-9]{2}-[0-9a-f]{7}$'
+    description: >
+      Extended regular expression a deploy tag must match. Passed to both
+      resolve_deploy_tag and resolve_previous_deploy_tag. Keep it in sync with
+      push_deploy_tag's date_format / sha_length if those are overridden.
+  notes_source:
+    type: enum
+    enum: ["deploy_diff_summaries", "gh_generate_notes"]
+    default: deploy_diff_summaries
+    description: >
+      deploy_diff_summaries asks CircleCI Deploy Diff Summaries for the release
+      notes and falls back to gh --generate-notes when that is unavailable.
+      gh_generate_notes skips the Deploy Diff Summaries call entirely (no
+      CircleCI API token needed).
+  gh_token_env:
+    type: env_var_name
+    default: GITHUB_TOKEN
+    description: >
+      Name of the environment variable holding the GitHub token given to
+      gh/setup. The token needs contents:write on this repository.
+  gh_version:
+    type: string
+    default: latest
+    description: >
+      GitHub CLI version gh/setup installs ("latest" or a full version such as
+      "2.63.2"). Pinning makes the installed version reproducible, but
+      circleci/github-cli@2.7.2 still queries github.com/cli/cli/releases/latest
+      before installing, so a transient GitHub error can fail this step either
+      way; "Rerun from failed" retries only this job.
+  circle_token_env:
+    type: env_var_name
+    default: CIRCLE_TOKEN
+    description: >
+      Name of the environment variable holding a CircleCI personal API token
+      for Deploy Diff Summaries. Missing or empty falls back to gh
+      --generate-notes. Ignored when notes_source is gh_generate_notes.
+  circleci_cli_version:
+    type: string
+    default: "1.0.49308"
+    description: >
+      Standalone CircleCI CLI version installed for Deploy Diff Summaries.
+      Change together with circleci_cli_sha256.
+  circleci_cli_sha256:
+    type: string
+    default: "1beeaddd7f5652612bfd9a8a0a303bb966fb69a355d7bb9d036d537f8f9e8b17"
+    description: >
+      Expected sha256 of circleci-cli_<version>_linux_amd64.tar.gz for
+      circleci_cli_version.
+  diff_summary_max_polls:
+    type: integer
+    default: 30
+    description: Maximum number of polls for the Deploy Diff Summary before falling back.
+  diff_summary_poll_interval:
+    type: integer
+    default: 2
+    description: Seconds between Deploy Diff Summary polls.
+
+steps:
+  - checkout
+  - resolve_deploy_tag:
+      tag_regex: << parameters.tag_regex >>
+  - gh/setup:
+      token: << parameters.gh_token_env >>
+      version: << parameters.gh_version >>
+  - run:
+      name: Skip if a GitHub Release already exists for the deploy tag
+      environment:
+        PARAM_TAG_ENV: RELEASE_TAG
+      command: <<include(scripts/halt_if_github_release_exists.sh)>>
+  - resolve_previous_deploy_tag:
+      tag_regex: << parameters.tag_regex >>
+  - when:
+      condition:
+        equal: ["deploy_diff_summaries", << parameters.notes_source >>]
+      steps:
+        - generate_release_notes_from_deploy_diff:
+            circleci_cli_version: << parameters.circleci_cli_version >>
+            circleci_cli_sha256: << parameters.circleci_cli_sha256 >>
+            circle_token_env: << parameters.circle_token_env >>
+            max_polls: << parameters.diff_summary_max_polls >>
+            poll_interval: << parameters.diff_summary_poll_interval >>
+  - create_github_release

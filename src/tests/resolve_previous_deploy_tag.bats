@@ -177,6 +177,59 @@ read_bash_env_var() {
     [ "$(read_bash_env_var PREV_RELEASE_TAG)" = "2026.08.01-c1c1c1c" ]
 }
 
+@test "release commit carrying a second deploy tag: the earlier-named one is not taken as the previous release (#94)" {
+    # A "Rerun workflow from start" on a later calendar day pushes a second
+    # date-stamped tag onto the same commit (hideokamoto/circleci-configurations#94).
+    # resolve_deploy_tag then picks the first tag by name, so RELEASE_TAG is
+    # the *older* tag and the newer one sits on the release commit too. The
+    # walk must skip the release commit itself; otherwise that sibling tag is
+    # reported as the previous release and the release notes range is empty.
+    make_commit "root" # untagged root ancestor; see file header note
+    make_commit "c1"
+    git tag "2026.09.20-1111111" # the true previous release
+    make_commit "c2"
+    git tag "2026.09.21-2222222" # first deploy of c2
+    git tag "2026.09.22-2222222" # rerun from start on the next day, same commit
+    export RELEASE_TAG="2026.09.21-2222222"
+
+    source "${SCRIPT}"
+    run main
+    [ "$status" -eq 0 ]
+
+    [ "$(read_bash_env_var PREV_RELEASE_TAG)" = "2026.09.20-1111111" ]
+}
+
+@test "release commit carrying a second deploy tag: the later-named one is not taken as the previous release (#94)" {
+    make_commit "root" # untagged root ancestor; see file header note
+    make_commit "c1"
+    git tag "2026.09.20-1111111" # the true previous release
+    make_commit "c2"
+    git tag "2026.09.21-2222222"
+    git tag "2026.09.22-2222222"
+    export RELEASE_TAG="2026.09.22-2222222"
+
+    source "${SCRIPT}"
+    run main
+    [ "$status" -eq 0 ]
+
+    [ "$(read_bash_env_var PREV_RELEASE_TAG)" = "2026.09.20-1111111" ]
+}
+
+@test "first release whose commit carries two deploy tags: nothing is exported (#94)" {
+    make_commit "root" # untagged root ancestor; see file header note
+    make_commit "c1"
+    git tag "2026.09.21-1111111"
+    git tag "2026.09.22-1111111"
+    export RELEASE_TAG="2026.09.21-1111111"
+
+    source "${SCRIPT}"
+    run main
+    [ "$status" -eq 0 ]
+
+    [ -z "$(read_bash_env_var PREV_RELEASE_TAG)" ]
+    [[ "$output" == *"no previous release tag found"* ]]
+}
+
 @test "first release: no matching ancestor tag, nothing is exported" {
     make_commit "c1"
     git tag "2026.05.01-abc0000"
@@ -306,6 +359,30 @@ read_bash_env_var() {
     [ ! -s "${BASH_ENV}" ]
 }
 
+@test "unanchored tag_regex matches whole tag names, as resolve_deploy_tag does: a tag merely containing a match is not a previous release" {
+    # resolve_deploy_tag matches tag_regex against the entire tag name
+    # (grep -Ex). The github_release_from_deploy_tag job passes the same
+    # tag_regex to both commands, so this walk must match whole names too;
+    # otherwise "preview-deploy-aaaaaaa" (which only contains a match of
+    # "deploy-[0-9a-f]{7}") would be taken as the previous release.
+    make_commit "root" # untagged root ancestor; see file header note
+    make_commit "c1"
+    git tag "deploy-1111111" # the true previous release
+    make_commit "c2"
+    git tag "preview-deploy-aaaaaaa" # only a substring matches
+    make_commit "c3"
+    git tag "deploy-2222222" # current release
+
+    export PARAM_TAG_REGEX='deploy-[0-9a-f]{7}'
+    export RELEASE_TAG="deploy-2222222"
+
+    source "${SCRIPT}"
+    run main
+    [ "$status" -eq 0 ]
+
+    [ "$(read_bash_env_var PREV_RELEASE_TAG)" = "deploy-1111111" ]
+}
+
 @test "tag_regex starting with a hyphen is not misread as a grep option during the commit walk" {
     # Regression test: `grep -E "${tag_regex}"` (no `--`) treats a
     # hyphen-led tag_regex value as a grep option rather than a pattern.
@@ -314,22 +391,21 @@ read_bash_env_var() {
     # error is silently absorbed by the walk's trailing `|| true`,
     # producing an empty prev_tag indistinguishable from a legitimate
     # first release even though a matching previous tag exists on an
-    # ancestor commit. `grep -E -- "${tag_regex}"` must treat "-n" as the
-    # literal two-character pattern it is (matching any tag containing a
-    # "-n" substring) instead.
+    # ancestor commit. `grep -Ex -- "${tag_regex}"` must treat a hyphen-led
+    # value as the pattern it is instead.
     #
     # Note: git refuses ref names that literally start with "-" (`fatal:
-    # ... is not a valid tag name`), so this test proves the fix via a
-    # hyphen-led *regex* matched against ordinary tags that merely contain
-    # "-n" as a substring, which is the exploitable shape here — the
-    # option-injection risk lives entirely in tag_regex, not in tag names.
+    # ... is not a valid tag name`), and tags are matched in full, so this
+    # test uses a hyphen-led *regex* whose leading "-?" is optional and the
+    # rest matches the whole tag — the option-injection risk lives entirely
+    # in tag_regex, not in tag names.
     make_commit "root" # untagged root ancestor; see file header note
     make_commit "c1"
     git tag "2026.09.10-nightly-abc0000" # the true previous release
     make_commit "c2"
     git tag "2026.09.10-nightly-def0000" # current release
 
-    export PARAM_TAG_REGEX='-n'
+    export PARAM_TAG_REGEX='-?2026\.09\.10-nightly-[0-9a-f]{7}'
     export RELEASE_TAG="2026.09.10-nightly-def0000"
 
     source "${SCRIPT}"

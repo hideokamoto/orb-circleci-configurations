@@ -15,7 +15,10 @@ description: >
   which is a topological invariant unaffected by clock skew or same-second
   tags — and takes the first commit along that walk that carries a tag
   matching <<parameters.tag_regex>> other than the current release tag
-  itself.
+  itself. The release commit is skipped: a "Rerun workflow from start" on a
+  later day can push a second date-stamped tag onto the same commit, and
+  that sibling tag is not a previous release (it would make the release
+  notes range empty).
 
   Exports the previous tag (when one is found) to `$BASH_ENV` under
   <<parameters.output_env>>. On the very first release, no matching ancestor
@@ -38,8 +41,10 @@ parameters:
     type: string
     default: '^[0-9]{4}\.[0-9]{2}\.[0-9]{2}-[0-9a-f]{7}$'
     description: >
-      Extended regular expression (as passed to `grep -E`) that a tag must
-      match to be considered a release tag. Defaults to the
+      Extended regular expression a tag must fully match (its entire name,
+      as passed to `grep -Ex`; `^`/`$` anchors are not required) to be
+      considered a release tag, the same rule as resolve_deploy_tag's
+      tag_regex. Defaults to the
       YYYY.MM.DD-<sha7> release tag shape used by this orb's release
       commands.
   release_tag_env:

@@ -26,13 +26,15 @@ packages them as reusable orb commands, jobs, and executors. It covers:
 
 Migration status (tracked in the [epic, #1](https://github.com/hideokamoto/orb-circleci-configurations/issues/1)):
 
-- **Released:** the digest-pinned executors, the Phase 1 commands, and the
-  `dependency_audit` job, all listed under [Current components](#current-components).
+- **Released:** the digest-pinned executors, the Phase 1 commands, the
+  `dependency_audit` job, and the `github_release_from_deploy_tag` job (#25,
+  shipped ahead of the rest of Phase 4 because it needs no deploy
+  credentials), all listed under [Current components](#current-components).
 - **Planned:** in the epic's order, the Phase 2 jobs that need no secrets
   (#19 `node_test`, #20 `cdk_validate`, #29 `aidlc_validate`), then the
   Phase 3 examples and `v1.0.0` (#31), then the Phase 4 deploy / publish
-  jobs, released as minor versions after `v1.0.0` (#21–#28: CDK / cdkd /
-  Cloudflare Workers deploy and cancel, GitHub Release, npm release flows).
+  jobs, released as minor versions after `v1.0.0` (#21–#24, #26–#28: CDK /
+  cdkd / Cloudflare Workers deploy and cancel, npm release flows).
   This README's component list grows to match as they ship.
 - **Not planned:** the arm64 Docker Buildx support for CDK (#7; the one
   pipeline that uses the arm64 template keeps its Config Source steps), SBOM
@@ -66,6 +68,7 @@ the map, not the spec.
 | command | `push_deploy_tag` | Pushes a date-stamped release tag for the deployed commit (default UTC `YYYY.MM.DD-<sha7>`), skipping if it already exists. If you override `date_format` / `sha_length`, keep `skip_unless_changed`'s `deploy_tag_glob` and the `tag_regex` of `resolve_deploy_tag` / `resolve_previous_deploy_tag` in sync. |
 | command | `cdk_synth` | Runs `cdk synth` against a placeholder AWS account/region, so a validate job can synth without real AWS credentials. |
 | job | `dependency_audit` | Runs `audit_deps`, then on failure `chunk_audit_fix` and a Slack notification. |
+| job | `github_release_from_deploy_tag` | Creates a GitHub Release for the deploy tag on the current commit (`resolve_deploy_tag` → `gh/setup` → existing-release check → `resolve_previous_deploy_tag` → `generate_release_notes_from_deploy_diff` → `create_github_release`). Run it after the job that pushes the tag. |
 
 Both executors pin their Docker image by digest rather than by a mutable tag
 (such as `:current`), so a given commit's CI behavior stays reproducible over

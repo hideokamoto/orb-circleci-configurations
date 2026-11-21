@@ -1,0 +1,30 @@
+description: >
+  Add GitHub Releases to an existing AWS CDK (or cdkd) deploy workflow. Only
+  the last job is new: github_release_from_deploy_tag looks up the deploy tag
+  on the commit, so it does not care how the deploy ran. Without Deploy Diff
+  Summaries (no CircleCI API token), set notes_source to gh_generate_notes and
+  drop the circleci context.
+usage:
+  version: 2.1
+
+  orbs:
+    configurations: hideokamoto/configurations@x.y.z
+
+  workflows:
+    build-deploy:
+      jobs:
+        # deploy-production and tag-release are this project's existing jobs;
+        # tag-release pushes the YYYY.MM.DD-<sha7> tag with push_deploy_tag.
+        - deploy-production:
+            filters: {branches: {only: main}}
+        - tag-release:
+            requires: [deploy-production]
+            filters: {branches: {only: main}}
+        - configurations/github_release_from_deploy_tag:
+            name: create-github-release
+            context: [github]
+            notes_source: gh_generate_notes
+            gh_version: "2.63.2"
+            requires: [tag-release]
+            filters: {branches: {only: main}}
+            serial-group: << pipeline.project.slug >>/create-github-release
