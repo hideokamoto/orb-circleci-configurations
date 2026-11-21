@@ -1,0 +1,23 @@
+description: >
+  Validate the AI-DLC harness embedded in an application repository. The
+  first workflow checks every push; the second only runs the checks when
+  `.claude/`, `.cursor/` or `aidlc/` changed, which saves CI time in a
+  repository where most changes are application code. No context or secret
+  is needed.
+usage:
+  version: 2.1
+
+  orbs:
+    configurations: hideokamoto/configurations@x.y.z
+
+  workflows:
+    validate:
+      jobs:
+        - configurations/aidlc_validate
+    validate-when-related:
+      jobs:
+        - configurations/aidlc_validate:
+            skip_unless_related: true
+            base_revision: << pipeline.git.base_revision >>
+            # pin_version: true                       # optional: fail on a version mismatch
+            # expected_aidlc_version: "aidlc 2.6.16"  # optional
