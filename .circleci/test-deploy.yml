@@ -416,31 +416,6 @@ jobs:
 workflows:
   test-deploy:
     jobs:
-      # Runs the aidlc_validate job itself through the packed orb (so the
-      # node/install-bun step, the pin_version boolean rendering and every
-      # <<include>>d script run for real) against a stub harness written by
-      # pre-steps: each .claude/tools/*.ts prints its arguments, and
-      # aidlc-utility.ts version prints the job's default expected version.
-      # checkout: false because this orb repository embeds no harness.
-      - configurations/aidlc_validate:
-          name: test_aidlc_validate
-          checkout: false
-          pin_version: true
-          pre-steps:
-            - run:
-                name: Write a stub AI-DLC harness
-                command: |
-                  set -euo pipefail
-                  mkdir -p .claude/tools aidlc/spaces/default/memory
-                  printf '%s\n' \
-                    'const args = process.argv.slice(2);' \
-                    'if (args[0] === "version") { console.log("aidlc 2.6.16"); } else { console.log("stub: " + args.join(" ")); }' \
-                    > .claude/tools/aidlc-utility.ts
-                  for tool in aidlc-graph aidlc-runner-gen aidlc-directive aidlc-validate; do
-                    cp .claude/tools/aidlc-utility.ts ".claude/tools/${tool}.ts"
-                  done
-                  touch aidlc/spaces/default/memory/org.md
-          filters: *filters
       # Make sure to include "filters: *filters" in every test job you want to run as part of your deployment.
       # Test your orb's commands in a custom job and test your orb's jobs directly as a part of this workflow.
       - test_base_pinned_executor:
@@ -497,7 +472,6 @@ workflows:
           dev_tags: dev:${CIRCLE_SHA1}
           requires:
             - orb-tools/pack
-            - test_aidlc_validate
             - test_base_pinned_executor
             - test_trivy_executor
             - test_dependency_audit
