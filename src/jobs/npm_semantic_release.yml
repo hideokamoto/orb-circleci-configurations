@@ -1,0 +1,182 @@
+description: >
+  Release an npm package from the default branch with semantic-release and
+  publish it through npm Trusted Publishing (OIDC), with no long-lived npm
+  token. One job covers the release jobs of circleci-configurations'
+  workflows/publish/npm-polyrepo-semantic-release.yaml (the defaults),
+  npm-polyrepo-bun-semantic-release.yaml (pkg_manager: bun) and
+  npm-monorepo-semantic-release.yaml (release_command running
+  multi-semantic-release, plus extra_release_packages).
+  Steps: halt when the HEAD commit carries a skip-ci marker ([skip ci],
+  [ci skip], circleci[skip], circleci:skip; skip_on_ci_skip_marker), a
+  fail-fast check of GITHUB_TOKEN and the semantic-release config,
+  `git fetch --tags`, dependency install without lifecycle scripts
+  (--ignore-scripts, because this job holds a contents:write token and OIDC),
+  the project build, a pinned semantic-release install outside the project,
+  then the release command through npm_publish_oidc. semantic-release decides
+  the version from Conventional Commits, pushes the tag, publishes to npm and
+  creates the GitHub Release; when nothing is releasable it exits 0. It never
+  commits to the branch, so no branch-protection bypass is needed.
+  If npm publish fails after the tag was pushed, a rerun sees the version as
+  released and publishes nothing: delete the tag (`git push origin
+  :refs/tags/v<version>`) and rerun. In the consuming workflow, attach a
+  context that allows OIDC publishing (e.g. npm-publish-guard) and the
+  `github` context (GITHUB_TOKEN with contents:write), and keep the branch
+  filter and serial-group there -- see examples/npm_semantic_release.yml.
+  Register the pipeline as a Trusted Publisher on npmjs.com first.
+  `--provenance` does not apply: npm does not generate provenance on CircleCI.
+
+executor:
+  name: node/default
+  tag: <<parameters.node_version>>
+resource_class: <<parameters.resource_class>>
+
+environment:
+  # npm publish runs the package's own prepare script; husky's must not try
+  # to install git hooks in CI (npm-polyrepo-bun-semantic-release.yaml).
+  HUSKY: "0"
+
+parameters:
+  app_dir:
+    type: string
+    default: "."
+    description: >
+      Directory (relative to the checkout) that holds package.json, the
+      lockfile and the semantic-release config. Dependencies are installed,
+      the build runs and the release command runs there.
+  skip_on_ci_skip_marker:
+    type: boolean
+    default: true
+    description: >
+      Halt the job (reported as success) when the HEAD commit message
+      contains [skip ci], [ci skip], circleci[skip] or circleci:skip, as the
+      pre-orb templates' skip-if-ci-skip-marker command did.
+  node_version:
+    type: string
+    default: "24.22"
+    description: >
+      cimg/node image tag for the node/default executor. npm Trusted
+      Publishing on CircleCI needs npm >= 11.11.0 (CircleCI OIDC detection,
+      npm/cli PR #8925); cimg/node:24.22 ships npm 11.19.1. Node 22.x images
+      ship npm 10 and cannot publish over OIDC.
+  resource_class:
+    type: string
+    default: medium
+    description: Resource class of the release container.
+  pkg_manager:
+    type: enum
+    enum: [pnpm, bun, npm]
+    default: pnpm
+    description: >
+      Package manager that installs dependencies (with --ignore-scripts) and
+      runs the default build. bun is installed first with the circleci/node
+      orb's install-bun at bun_version, and needs a committed bun.lock.
+  bun_version:
+    type: string
+    default: "1.3.14"
+    description: bun version to install. Used only when pkg_manager is bun.
+  build_command:
+    type: string
+    default: ""
+    description: >
+      Command that builds what gets published. Empty runs
+      `<pkg_manager> run build`. The test job's build output does not reach
+      this job, so the build always runs here.
+  config_file:
+    type: string
+    default: .releaserc.json
+    description: >
+      semantic-release config file that must exist before releasing (the
+      circleci-configurations template ships templates/semantic-release/.releaserc.json).
+      Set to an empty string to skip the check, e.g. for release.config.js.
+  semantic_release_version:
+    type: string
+    default: "25.0.9"
+    description: >
+      Exact semantic-release version to install. Ranges and dist-tags such as
+      latest are rejected: this tool runs with a contents:write token.
+  conventional_changelog_version:
+    type: string
+    default: "9.3.1"
+    description: >
+      Exact conventional-changelog-conventionalcommits version, needed for
+      `feat!:` to count as a major release. 10.x does not work with the
+      changelog writer bundled in semantic-release 25.0.9.
+  extra_release_packages:
+    type: string
+    default: ""
+    description: >
+      Extra space-separated `<package>@<exact version>` specs installed next
+      to semantic-release, e.g. `multi-semantic-release@3.1.0` for a pnpm
+      workspace.
+  release_command:
+    type: string
+    default: semantic-release
+    description: >
+      Command that runs the release once NPM_ID_TOKEN is exported. The pinned
+      tools are first on PATH. For a pnpm workspace use
+      `multi-semantic-release --ignore-private-packages --deps.prefix='^'`
+      with extra_release_packages set. Never add `--provenance`.
+
+steps:
+  - checkout
+  - when:
+      condition: <<parameters.skip_on_ci_skip_marker>>
+      steps:
+        - run:
+            name: Skip on [skip ci] marker
+            command: <<include(scripts/halt_on_ci_skip_marker.sh)>>
+  - run:
+      name: Check semantic-release prerequisites
+      working_directory: <<parameters.app_dir>>
+      environment:
+        PARAM_CONFIG_FILE: <<parameters.config_file>>
+      command: <<include(scripts/semantic_release_preflight.sh)>>
+  - when:
+      condition:
+        equal: [bun, <<parameters.pkg_manager>>]
+      steps:
+        - node/install-bun:
+            version: <<parameters.bun_version>>
+        - node/install-packages:
+            app-dir: <<parameters.app_dir>>
+            pkg-manager: bun
+            override-ci-command: bun install --frozen-lockfile --ignore-scripts
+  - when:
+      condition:
+        equal: [pnpm, <<parameters.pkg_manager>>]
+      steps:
+        - node/install-packages:
+            app-dir: <<parameters.app_dir>>
+            pkg-manager: pnpm
+            override-ci-command: pnpm install --frozen-lockfile --ignore-scripts
+  - when:
+      condition:
+        equal: [npm, <<parameters.pkg_manager>>]
+      steps:
+        - node/install-packages:
+            app-dir: <<parameters.app_dir>>
+            pkg-manager: npm
+            override-ci-command: npm ci --ignore-scripts
+  - when:
+      condition: <<parameters.build_command>>
+      steps:
+        - run:
+            name: Build
+            working_directory: <<parameters.app_dir>>
+            command: <<parameters.build_command>>
+  - unless:
+      condition: <<parameters.build_command>>
+      steps:
+        - run:
+            name: Build
+            working_directory: <<parameters.app_dir>>
+            command: <<parameters.pkg_manager>> run build
+  - run:
+      name: Install pinned semantic-release (without lifecycle scripts)
+      environment:
+        PARAM_SEMANTIC_RELEASE_VERSION: <<parameters.semantic_release_version>>
+        PARAM_CONVENTIONAL_CHANGELOG_VERSION: <<parameters.conventional_changelog_version>>
+        PARAM_EXTRA_RELEASE_PACKAGES: <<parameters.extra_release_packages>>
+      command: <<include(scripts/install_semantic_release.sh)>>
+  - npm_publish_oidc:
+      publish_command: cd '<<parameters.app_dir>>' && <<parameters.release_command>>

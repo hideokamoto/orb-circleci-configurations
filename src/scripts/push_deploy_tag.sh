@@ -8,6 +8,48 @@ set -euo pipefail
 # so BATS tests can redirect it to a stub.
 CIRCLECI_CLI="${CIRCLECI_CLI:-/usr/bin/circleci}"
 
+# is_true
+#
+# Args: $1 - a boolean parameter value as CircleCI renders it into a run
+#   step's environment ("1"/"0"), or "true"/"false".
+# Returns: 0 when the value is 1 or true, 1 otherwise.
+is_true() {
+    case "${1:-}" in
+        1 | true) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# existing_deploy_tag
+#
+# Prints the first remote tag (by name) that points at CIRCLE_SHA1 and fully
+# matches PARAM_TAG_REGEX (default: the YYYY.MM.DD-<sha7> deploy tag shape,
+# the same default as resolve_deploy_tag), or nothing. Annotated tags are
+# matched by the commit they peel to.
+# Returns: 0 on success (with or without a match); 1 when the remote cannot
+#   be listed or tag_regex is not a valid extended regular expression.
+existing_deploy_tag() {
+    local tag_regex listing rc
+    # The default lives in its own variable: a "}" inside ${VAR:-...} (from
+    # the {4} quantifier) would end the parameter expansion early.
+    local default_regex='^[0-9]{4}\.[0-9]{2}\.[0-9]{2}-[0-9a-f]{7}$'
+    tag_regex="$("$CIRCLECI_CLI" env subst "${PARAM_TAG_REGEX:-${default_regex}}")"
+    rc=0
+    printf '' | grep -Eq -- "${tag_regex}" || rc=$?
+    if [ "${rc}" -gt 1 ]; then
+        echo "tag_regex '${tag_regex}' is not a valid extended regular expression." >&2
+        return 1
+    fi
+    if ! listing="$(git ls-remote --tags origin)"; then
+        echo "Could not list remote tags to check for an existing deploy tag." >&2
+        return 1
+    fi
+    printf '%s\n' "${listing}" |
+        awk -v sha="${CIRCLE_SHA1}" '$1 == sha { name = $2; sub("^refs/tags/", "", name); sub("\\^\\{\\}$", "", name); print name }' |
+        { grep -Ex -- "${tag_regex}" || true; } |
+        sort -u | head -n1
+}
+
 # push_deploy_tag
 #
 # Computes a date-stamped release tag for the current commit and pushes it
@@ -91,6 +133,20 @@ push_deploy_tag() {
         awk -v expected="refs/tags/${tag}" '$2 == expected { found=1 } END { exit !found }'; then
         echo "Tag ${tag} already exists on remote, skipping."
         return 0
+    fi
+
+    # hideokamoto/circleci-configurations#94: a "Rerun workflow from start" on
+    # a later day computes a new date, so without this check the same commit
+    # would get a second deploy tag. Reuse a deploy tag the commit already has.
+    if is_true "${PARAM_REUSE_EXISTING_TAG:-1}"; then
+        local existing
+        if ! existing="$(existing_deploy_tag)"; then
+            return 1
+        fi
+        if [ -n "${existing}" ]; then
+            echo "Commit ${CIRCLE_SHA1} already has deploy tag ${existing} on remote; not pushing ${tag}."
+            return 0
+        fi
     fi
 
     git tag "${tag}"
