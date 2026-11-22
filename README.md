@@ -21,26 +21,25 @@ packages them as reusable orb commands, jobs, and executors. It covers:
   generating release notes from CircleCI Deploy Diff Summaries (with a
   `gh --generate-notes` fallback), and creating the GitHub Release
   idempotently.
-- **AI-DLC config validation** — validating a repository's AI-DLC workflow
-  state as a CI job (planned; see below).
 
 Migration status (tracked in the [epic, #1](https://github.com/hideokamoto/orb-circleci-configurations/issues/1)):
 
-- **Released:** the digest-pinned executors, the Phase 1 commands, the
-  `dependency_audit` job, and the `github_release_from_deploy_tag` job (#25,
-  shipped ahead of the rest of Phase 4 because it needs no deploy
-  credentials), all listed under [Current components](#current-components).
-- **Planned:** in the epic's order, the Phase 2 jobs that need no secrets
-  (#19 `node_test`, #20 `cdk_validate`, #29 `aidlc_validate`), then the
-  Phase 3 examples and `v1.0.0` (#31), then the Phase 4 deploy / publish
-  jobs, released as minor versions after `v1.0.0` (#21–#24, #26–#28: CDK /
-  cdkd / Cloudflare Workers deploy and cancel, npm release flows).
-  This README's component list grows to match as they ship.
-- **Not planned:** the arm64 Docker Buildx support for CDK (#7; the one
-  pipeline that uses the arm64 template keeps its Config Source steps), SBOM
-  generation and sending it to Port (#17, #30; no pipeline uses the SBOM
-  template), a bun install command (#12; use `circleci/node`'s
-  `install-bun`), and a skip-on-release-commit command (#16).
+- **Released:** the digest-pinned executors, the Phase 1 commands, and the
+  jobs listed under [Current components](#current-components).
+- **Approach:** a job is added only where the same logic is repeated in two
+  or more Config Source templates of hideokamoto/circleci-configurations
+  (one template already serves many projects, so moving single-template
+  logic here removes no duplication). Steps that only one template has stay
+  in that template, composed from this orb's commands.
+- **Planned:** `v1.0.0` (#31).
+- **Not planned:** whole deploy jobs for AWS CDK, cdkd and Cloudflare Workers
+  (#21, #22, #23; the remaining steps exist in one template each), a
+  `node_test` job (#19; use `circleci/node`'s `node/test`), Changesets and
+  release-please release jobs (#27, #28), a tag-triggered publish job (#26),
+  an AI-DLC validation job (#29; no pipeline uses those templates), the
+  arm64 Docker Buildx support for CDK (#7; the arm64 templates are being
+  retired), SBOM generation and sending it to Port (#17, #30), a bun install
+  command (#12), and a skip-on-release-commit command (#16).
 
 Each component's own `description` (visible via `circleci orb info` and the
 orb registry) is the source of truth for its exact contract; this README is
@@ -67,6 +66,8 @@ the map, not the spec.
 | command | `resolve_deploy_tag` | Reads back the deploy tag pushed to a commit and exports it to `$BASH_ENV`. |
 | command | `push_deploy_tag` | Pushes a date-stamped release tag for the deployed commit (default UTC `YYYY.MM.DD-<sha7>`), skipping if it already exists. If you override `date_format` / `sha_length`, keep `skip_unless_changed`'s `deploy_tag_glob` and the `tag_regex` of `resolve_deploy_tag` / `resolve_previous_deploy_tag` in sync. |
 | command | `cdk_synth` | Runs `cdk synth` against a placeholder AWS account/region, so a validate job can synth without real AWS credentials. |
+| job | `cdk_validate` | Builds an AWS CDK app and runs `cdk_synth` (placeholder account/region), optionally followed by the test script and `store_test_results`. |
+| job | `deploy_cancel` | Marks the workflow's Deploys marker CANCELED after the deploy job was canceled or failed, tolerating a marker the deploy job already resolved. |
 | job | `dependency_audit` | Runs `audit_deps`, then on failure `chunk_audit_fix` and a Slack notification. |
 | job | `github_release_from_deploy_tag` | Creates a GitHub Release for the deploy tag on the current commit (`resolve_deploy_tag` → `gh/setup` → existing-release check → `resolve_previous_deploy_tag` → `generate_release_notes_from_deploy_diff` → `create_github_release`). Run it after the job that pushes the tag. |
 | job | `npm_semantic_release` | Releases an npm package (pnpm / bun / npm, or a pnpm workspace via multi-semantic-release) with a pinned semantic-release and publishes it over OIDC through `npm_publish_oidc`. |

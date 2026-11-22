@@ -1,0 +1,101 @@
+description: >
+  Build an AWS CDK (TypeScript) app and run `cdk synth` against placeholder
+  account/region values, optionally followed by the test suite. Nothing is
+  deployed and no AWS credentials are needed. Ported from the `validate`
+  job of hideokamoto/circleci-configurations' workflows/deployment/
+  aws-cdk.yaml and aws-cdkd.yaml (identical in both) and of
+  workflows/validation/aws-cdk.yaml (the same steps plus tests; use
+  run_tests: true).
+
+  Steps: checkout, node/install-packages, `<pkg_manager> run <build_script>`,
+  cdk_synth, then with run_tests `<pkg_manager> run <test_script>` and
+  store_test_results.
+
+  No Docker is available in this job. If the app defines a NodejsFunction,
+  add esbuild to its devDependencies so CDK bundles locally; otherwise CDK
+  falls back to `docker run` and synth fails with "Cannot connect to the
+  Docker daemon".
+
+executor:
+  name: node/default
+  tag: << parameters.node_version >>
+resource_class: << parameters.resource_class >>
+
+parameters:
+  node_version:
+    type: string
+    default: "24.22"
+    description: cimg/node image tag for the node/default executor.
+  resource_class:
+    type: string
+    default: medium
+    description: >
+      Resource class of the job container. The deploy templates used medium;
+      workflows/validation/aws-cdk.yaml used small.
+  checkout:
+    type: boolean
+    default: true
+    description: >
+      Check out the project first. Set to false only when earlier steps (e.g.
+      pre-steps) already put the app in the working directory.
+  pkg_manager:
+    type: enum
+    enum: ["pnpm", "npm", "yarn"]
+    default: pnpm
+    description: >
+      Package manager passed to node/install-packages and used to run the
+      build, synth and test scripts.
+  build_script:
+    type: string
+    default: build
+    description: package.json script that compiles the app.
+  synth_script:
+    type: string
+    default: synth
+    description: package.json script that runs `cdk synth`.
+  account_placeholder:
+    type: string
+    default: "123456789012"
+    description: >
+      CDK_DEFAULT_ACCOUNT used when that variable is unset (see cdk_synth).
+  region_placeholder:
+    type: string
+    default: us-east-1
+    description: >
+      CDK_DEFAULT_REGION used when that variable is unset (see cdk_synth).
+  run_tests:
+    type: boolean
+    default: false
+    description: Run the test script and store its results after synth.
+  test_script:
+    type: string
+    default: test
+    description: package.json script that runs the tests (with run_tests).
+  test_results_path:
+    type: string
+    default: reports
+    description: Directory passed to store_test_results (with run_tests).
+
+steps:
+  - when:
+      condition: << parameters.checkout >>
+      steps:
+        - checkout
+  - node/install-packages:
+      pkg-manager: << parameters.pkg_manager >>
+  - run:
+      name: Build (TypeScript)
+      command: << parameters.pkg_manager >> run << parameters.build_script >>
+  - cdk_synth:
+      pkg_manager: << parameters.pkg_manager >>
+      synth_script: << parameters.synth_script >>
+      account_placeholder: << parameters.account_placeholder >>
+      region_placeholder: << parameters.region_placeholder >>
+  - when:
+      condition: << parameters.run_tests >>
+      steps:
+        - run:
+            name: Test
+            command: << parameters.pkg_manager >> run << parameters.test_script >>
+        - store_test_results:
+            path: << parameters.test_results_path >>

@@ -53,6 +53,12 @@ export_to_bash_env() {
 # output at all -- is treated as NOT tolerable, matching the "don't swallow
 # unrelated failures" requirement this function exists to enforce.
 #
+# "has already completed" is the text the build-agent CLI actually prints
+# when a cancellation job updates a marker the deploy job already resolved
+# (observed in production cancel-deploy logs, 2026-11: "failed to call
+# releases API: Cannot update the status of a release that has already
+# completed"). The other substrings are kept for messages not yet observed.
+#
 # Args:
 #   $1 - the CLI call's combined stdout+stderr output (may be empty).
 # Returns:
@@ -64,7 +70,7 @@ marker_missing_or_resolved() {
   local output_lower
   output_lower="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
   case "$output_lower" in
-    *"not found"*|*"no release"*|*"no such release"*|*"does not exist"*|*"already resolved"*|*"already exists with status"*|*"already in a terminal state"*|*"already terminal"*)
+    *"not found"*|*"no release"*|*"no such release"*|*"does not exist"*|*"already resolved"*|*"already exists with status"*|*"already in a terminal state"*|*"already terminal"*|*"has already completed"*)
       return 0
       ;;
     *)
