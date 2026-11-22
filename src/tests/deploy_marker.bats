@@ -219,6 +219,11 @@ teardown() {
   [ "$status" -eq 0 ]
 }
 
+@test "marker_missing_or_resolved accepts the CLI's 'already completed' message (observed in production)" {
+  run marker_missing_or_resolved "failed to call releases API: Cannot update the status of a release that has already completed"
+  [ "$status" -eq 0 ]
+}
+
 @test "marker_missing_or_resolved is case-insensitive" {
   run marker_missing_or_resolved "RELEASE NOT FOUND"
   [ "$status" -eq 0 ]
@@ -397,6 +402,19 @@ teardown() {
   export PARAM_TOLERATE_MISSING="true"
   export STUB_EXIT_CODE="1"
   export STUB_OUTPUT="release svc-wf-123 is already resolved"
+
+  run deploy_marker_update
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "already resolved or not found"
+}
+
+@test "deploy_marker_update tolerates the CLI's 'already completed' failure when tolerate_missing is true" {
+  export PARAM_ACTION="update"
+  export PARAM_COMPONENT_NAME="svc"
+  export PARAM_STATUS="CANCELED"
+  export PARAM_TOLERATE_MISSING="true"
+  export STUB_EXIT_CODE="1"
+  export STUB_OUTPUT="Error: exit status 1: Error: failed to call releases API: Cannot update the status of a release that has already completed"
 
   run deploy_marker_update
   [ "$status" -eq 0 ]
