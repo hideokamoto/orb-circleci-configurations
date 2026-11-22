@@ -428,6 +428,55 @@ workflows:
           filters: *filters
       - test_push_deploy_tag:
           filters: *filters
+      # Runs the tag_release job end to end against a throwaway local bare
+      # remote (never this repo's real origin): checkout is off and pre-steps
+      # create the repository, so the tag push goes to /tmp. GITHUB_TOKEN is
+      # a dummy because gh/setup only needs a value to configure git; nothing
+      # talks to GitHub with it. post-steps then check the tag exists, and
+      # that a later "day" (another date_format) does not add a second deploy
+      # tag to the same commit (hideokamoto/circleci-configurations#94).
+      - configurations/tag_release:
+          name: test_tag_release
+          checkout: false
+          pre-steps:
+            - run:
+                name: Set up a local bare remote and a commit to tag
+                command: |
+                  set -euo pipefail
+                  git init --quiet --bare /tmp/tag_release_remote.git
+                  git init --quiet .
+                  git remote add origin /tmp/tag_release_remote.git
+                  git config user.email "orb-test@example.com"
+                  git config user.name "Orb Test"
+                  mkdir -p src && echo "code" > src/app.txt
+                  git add src/app.txt
+                  git commit --quiet -m "code change"
+                  git push --quiet origin HEAD:main
+                  {
+                    echo "export CIRCLE_SHA1=\"$(git rev-parse HEAD)\""
+                    echo 'export GITHUB_TOKEN="test-dummy-not-a-token"'
+                  } >> "$BASH_ENV"
+          post-steps:
+            - run:
+                name: Check the deploy tag was pushed to the local remote
+                command: |
+                  set -euo pipefail
+                  tag="$(date -u +%Y.%m.%d)-${CIRCLE_SHA1:0:7}"
+                  git ls-remote --tags origin "refs/tags/${tag}" | grep -q "refs/tags/${tag}$"
+                  echo "found ${tag}"
+            - configurations/push_deploy_tag:
+                date_format: "1999.%m.%d"
+            - run:
+                name: Check a later rerun did not add a second deploy tag
+                command: |
+                  set -euo pipefail
+                  if git ls-remote --tags origin | grep -q "refs/tags/1999\."; then
+                    echo "A second deploy tag was pushed for the same commit" >&2
+                    git ls-remote --tags origin >&2
+                    exit 1
+                  fi
+                  echo "no second deploy tag"
+          filters: *filters
       - test_resolve_deploy_tag:
           filters: *filters
       - test_resolve_deploy_tag_halts_without_tag:
@@ -505,6 +554,7 @@ workflows:
             - test_resolve_deploy_tag
             - test_resolve_deploy_tag_halts_without_tag
             - test_push_deploy_tag
+            - test_tag_release
             - test_cdk_synth
             - test_npm_publish_oidc
             - test_npm_semantic_release

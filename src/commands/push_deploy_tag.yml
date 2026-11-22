@@ -38,6 +38,14 @@ description: >
   other commands' patterns in sync or tag resolution elsewhere in the orb
   will stop matching the tags this command creates.
 
+  Reusing an existing deploy tag (reuse_existing_tag, default true): before
+  pushing, the command lists the remote's tags and skips when one that fully
+  matches tag_regex already points at CIRCLE_SHA1 (annotated tags count by
+  the commit they peel to). Without this, a "Rerun workflow from start" on a
+  later day computed a new date and pushed a second deploy tag onto the same
+  commit (hideokamoto/circleci-configurations#94). Set it to false to keep
+  the previous behavior.
+
 parameters:
   date_format:
     type: string
@@ -59,10 +67,28 @@ parameters:
       40); the command validates this before creating the tag and fails
       fast on 0, negative, or non-numeric values.
 
+  tag_regex:
+    type: string
+    default: '^[0-9]{4}\.[0-9]{2}\.[0-9]{2}-[0-9a-f]{7}$'
+    description: >
+      Extended regular expression a remote tag must fully match to count as
+      an existing deploy tag of this commit (reuse_existing_tag). Same
+      default as resolve_deploy_tag's tag_regex; keep it in sync with
+      date_format / sha_length if those are overridden.
+  reuse_existing_tag:
+    type: boolean
+    default: true
+    description: >
+      Skip pushing when the commit already has a deploy tag (matching
+      tag_regex) on the remote, so a rerun on a later day does not add a
+      second dated tag to the same commit.
+
 steps:
   - run:
       name: Push git tag on success
       environment:
         PARAM_DATE_FORMAT: <<parameters.date_format>>
         PARAM_SHA_LENGTH: <<parameters.sha_length>>
+        PARAM_TAG_REGEX: <<parameters.tag_regex>>
+        PARAM_REUSE_EXISTING_TAG: <<parameters.reuse_existing_tag>>
       command: <<include(scripts/push_deploy_tag.sh)>>
