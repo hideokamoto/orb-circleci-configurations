@@ -1,0 +1,19 @@
+description: >
+  Build and synth an AWS CDK app on every push without deploying, and run
+  its tests on a separate validation pipeline. run_tests adds
+  `<pkg_manager> run test` and store_test_results after synth.
+usage:
+  version: 2.1
+
+  orbs:
+    configurations: hideokamoto/configurations@x.y.z
+
+  workflows:
+    validate:
+      jobs:
+        - configurations/cdk_validate:
+            name: validate
+        - configurations/cdk_validate:
+            name: validate-with-tests
+            resource_class: small
+            run_tests: true

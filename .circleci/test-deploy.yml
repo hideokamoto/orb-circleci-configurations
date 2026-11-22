@@ -526,6 +526,67 @@ workflows:
       - configurations/github_release_from_deploy_tag:
           name: test_github_release_from_deploy_tag_halts_without_tag
           filters: *filters
+      # Runs deploy_cancel against the real marker test_with_deploy_marker
+      # created in this same workflow (component orb-test, same
+      # CIRCLE_WORKFLOW_ID). That marker is already SUCCESS, so the CLI
+      # answers "Cannot update the status of a release that has already
+      # completed" -- the answer production cancel-deploy jobs get after a
+      # failed deploy -- and the job must treat it as success.
+      - configurations/deploy_cancel:
+          name: test_deploy_cancel
+          component_name: orb-test
+          requires:
+            - test_with_deploy_marker
+          filters: *filters
+      # Runs cdk_validate end to end on a throwaway npm fixture (no checkout,
+      # no CDK, no dependencies): the build/synth/test scripts only record
+      # what they saw, and post-steps check that the build ran, synth got
+      # the placeholder account/region, and the test script ran.
+      - configurations/cdk_validate:
+          name: test_cdk_validate
+          checkout: false
+          pkg_manager: npm
+          resource_class: small
+          run_tests: true
+          pre-steps:
+            - run:
+                name: Write a CDK-app-shaped npm fixture
+                command: |
+                  set -euo pipefail
+                  cat > package.json \<<'PKGJSON'
+                  {
+                    "name": "cdk-validate-fixture",
+                    "private": true,
+                    "scripts": {
+                      "build": "echo built > build-output.txt",
+                      "synth": "env | grep '^CDK_DEFAULT_' | sort > synth-output.txt",
+                      "test": "mkdir -p reports && echo tested > test-output.txt"
+                    }
+                  }
+                  PKGJSON
+                  cat > package-lock.json \<<'LOCKJSON'
+                  {
+                    "name": "cdk-validate-fixture",
+                    "lockfileVersion": 3,
+                    "requires": true,
+                    "packages": {
+                      "": {
+                        "name": "cdk-validate-fixture"
+                      }
+                    }
+                  }
+                  LOCKJSON
+          post-steps:
+            - run:
+                name: Check build, synth and test ran with the placeholders
+                command: |
+                  set -euo pipefail
+                  grep -qx built build-output.txt
+                  cat synth-output.txt
+                  grep -qx 'CDK_DEFAULT_ACCOUNT=123456789012' synth-output.txt
+                  grep -qx 'CDK_DEFAULT_REGION=us-east-1' synth-output.txt
+                  grep -qx tested test-output.txt
+          filters: *filters
       # The orb must be re-packed for publishing, and saved to the workspace.
       - orb-tools/pack:
           filters: *filters
@@ -556,6 +617,8 @@ workflows:
             - test_push_deploy_tag
             - test_tag_release
             - test_cdk_synth
+            - test_cdk_validate
+            - test_deploy_cancel
             - test_npm_publish_oidc
             - test_npm_semantic_release
           context: circleci

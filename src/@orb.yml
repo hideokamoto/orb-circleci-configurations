@@ -4,8 +4,8 @@ description: >
   Shared CI/CD building blocks for CircleCI pipelines: deploy markers around
   release commands, path-based skip logic for change-gated jobs, npm publish
   over OIDC (no static npm tokens), AWS CDK and Cloudflare Workers deploy
-  helpers, GitHub Release automation driven by deploy tags, AI-DLC config
-  validation, and SBOM generation with Trivy for supply-chain visibility.
+  helpers, GitHub Release automation driven by deploy tags, and a pinned
+  Trivy executor for supply-chain checks.
   Components are added incrementally; see the README for current coverage.
 
 display:

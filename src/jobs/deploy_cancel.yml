@@ -1,0 +1,49 @@
+description: >
+  Mark the CircleCI Deploys marker of the current workflow as CANCELED when
+  the deploy job was canceled or failed. Ported from the `cancel-deploy` job
+  of hideokamoto/circleci-configurations' workflows/deployment/
+  cloudflare-workers.yaml and aws-cdk.yaml (identical in both).
+
+  Run it with `requires: [<deploy job>: [canceled, failed]]` and the same
+  branch filter as the deploy job; see the deploy_cancel_after_deploy
+  example. No checkout. The marker name is recomputed as
+  "<component_name>-$CIRCLE_WORKFLOW_ID" (component_name, then
+  $DEPLOY_COMPONENT_NAME, then $CIRCLE_PROJECT_REPONAME), the same rule as
+  with_deploy_marker, so it finds the marker the deploy job planned.
+
+  When the deploy job failed, its own on_fail step has usually resolved the
+  marker to FAILED already, and the CLI then answers "Cannot update the
+  status of a release that has already completed". That answer and the
+  other messages deploy_marker_update tolerates (missing or already
+  resolved marker) are logged and treated as success. Any other CLI
+  failure (authentication, connectivity, ...) fails this job; the pre-orb
+  inline job ignored every failure.
+
+executor: << parameters.executor >>
+resource_class: << parameters.resource_class >>
+
+parameters:
+  executor:
+    type: executor
+    default: base_pinned
+    description: >
+      Executor to run on. Needs only the build-agent CLI at
+      /usr/bin/circleci, which every CircleCI job has; the default is the
+      digest-pinned cimg/base image the inline job used.
+  resource_class:
+    type: string
+    default: small
+    description: Resource class of the job container.
+  component_name:
+    type: string
+    default: ""
+    description: >
+      Deploys component name of the deploy job's marker. Empty falls back to
+      $DEPLOY_COMPONENT_NAME and then $CIRCLE_PROJECT_REPONAME. Must match
+      what the deploy job used.
+
+steps:
+  - deploy_marker_update:
+      status: CANCELED
+      component_name: << parameters.component_name >>
+      tolerate_missing: true

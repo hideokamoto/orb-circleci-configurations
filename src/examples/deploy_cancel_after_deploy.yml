@@ -1,0 +1,39 @@
+description: >
+  Mark the deploy's CircleCI Deploys marker as CANCELED when the deploy job
+  is canceled or fails. The deploy job plans the marker with
+  with_deploy_marker; deploy_cancel recomputes the same marker name in its
+  own container. The requires status list and the branch filter stay in the
+  workflow because orbs cannot carry them.
+usage:
+  version: 2.1
+
+  orbs:
+    configurations: hideokamoto/configurations@x.y.z
+
+  jobs:
+    deploy-production:
+      docker:
+        - image: cimg/base:current
+      steps:
+        - checkout
+        - configurations/with_deploy_marker:
+            environment_name: production
+            steps:
+              - run: echo "deploy here"
+
+  workflows:
+    build-deploy:
+      jobs:
+        - deploy-production:
+            filters:
+              branches:
+                only: main
+        - configurations/deploy_cancel:
+            name: cancel-deploy
+            requires:
+              - deploy-production:
+                  - canceled
+                  - failed
+            filters:
+              branches:
+                only: main
