@@ -332,3 +332,107 @@ teardown() {
   run git ls-remote --tags origin
   [ -z "$output" ]
 }
+
+# --- Reusing a deploy tag the commit already has (hideokamoto/circleci-configurations#94)
+# A "Rerun workflow from start" on a later day must not push a second
+# date-stamped tag onto a commit that already carries one.
+
+@test "skips when the commit already has a deploy tag from an earlier day (#94)" {
+  export PARAM_DATE_FORMAT="%Y.%m.%d"
+  export PARAM_SHA_LENGTH="7"
+  export PARAM_TAG_REGEX='^[0-9]{4}\.[0-9]{2}\.[0-9]{2}-[0-9a-f]{7}$'
+  export PARAM_REUSE_EXISTING_TAG="1"
+  old_tag="2020.01.01-${CIRCLE_SHA1:0:7}"
+  git tag "${old_tag}"
+  git push --quiet origin "${old_tag}"
+
+  run push_deploy_tag
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"already has deploy tag ${old_tag}"* ]]
+
+  today_tag="$(date -u +%Y.%m.%d)-${CIRCLE_SHA1:0:7}"
+  run git ls-remote --tags origin "refs/tags/${today_tag}"
+  [ -z "$output" ]
+}
+
+@test "an annotated deploy tag on the commit also counts as existing (#94)" {
+  export PARAM_DATE_FORMAT="%Y.%m.%d"
+  export PARAM_SHA_LENGTH="7"
+  export PARAM_TAG_REGEX='^[0-9]{4}\.[0-9]{2}\.[0-9]{2}-[0-9a-f]{7}$'
+  export PARAM_REUSE_EXISTING_TAG="1"
+  old_tag="2020.01.02-${CIRCLE_SHA1:0:7}"
+  git tag -a -m "annotated" "${old_tag}"
+  git push --quiet origin "${old_tag}"
+
+  run push_deploy_tag
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"already has deploy tag ${old_tag}"* ]]
+  today_tag="$(date -u +%Y.%m.%d)-${CIRCLE_SHA1:0:7}"
+  run git ls-remote --tags origin "refs/tags/${today_tag}"
+  [ -z "$output" ]
+}
+
+@test "a non-deploy tag on the commit does not stop a new deploy tag (#94)" {
+  export PARAM_DATE_FORMAT="%Y.%m.%d"
+  export PARAM_SHA_LENGTH="7"
+  export PARAM_TAG_REGEX='^[0-9]{4}\.[0-9]{2}\.[0-9]{2}-[0-9a-f]{7}$'
+  export PARAM_REUSE_EXISTING_TAG="1"
+  git tag "v1.0.0"
+  git push --quiet origin "v1.0.0"
+
+  run push_deploy_tag
+  [ "$status" -eq 0 ]
+  today_tag="$(date -u +%Y.%m.%d)-${CIRCLE_SHA1:0:7}"
+  run git ls-remote --tags origin "refs/tags/${today_tag}"
+  [[ "$output" == *"${today_tag}"* ]]
+}
+
+@test "a deploy tag on a different commit does not stop a new deploy tag (#94)" {
+  export PARAM_DATE_FORMAT="%Y.%m.%d"
+  export PARAM_SHA_LENGTH="7"
+  export PARAM_TAG_REGEX='^[0-9]{4}\.[0-9]{2}\.[0-9]{2}-[0-9a-f]{7}$'
+  export PARAM_REUSE_EXISTING_TAG="1"
+  prev_sha="$(git rev-parse HEAD)"
+  git tag "2020.01.01-${prev_sha:0:7}"
+  git push --quiet origin "2020.01.01-${prev_sha:0:7}"
+  git commit --quiet --allow-empty -m "next commit"
+  git push --quiet origin HEAD:main
+  CIRCLE_SHA1="$(git rev-parse HEAD)"
+  export CIRCLE_SHA1
+
+  run push_deploy_tag
+  [ "$status" -eq 0 ]
+  today_tag="$(date -u +%Y.%m.%d)-${CIRCLE_SHA1:0:7}"
+  run git ls-remote --tags origin "refs/tags/${today_tag}"
+  [[ "$output" == *"${today_tag}"* ]]
+}
+
+@test "reuse_existing_tag false keeps the old behavior: a second dated tag is pushed" {
+  export PARAM_DATE_FORMAT="%Y.%m.%d"
+  export PARAM_SHA_LENGTH="7"
+  export PARAM_TAG_REGEX='^[0-9]{4}\.[0-9]{2}\.[0-9]{2}-[0-9a-f]{7}$'
+  export PARAM_REUSE_EXISTING_TAG="0"
+  old_tag="2020.01.01-${CIRCLE_SHA1:0:7}"
+  git tag "${old_tag}"
+  git push --quiet origin "${old_tag}"
+
+  run push_deploy_tag
+  [ "$status" -eq 0 ]
+  today_tag="$(date -u +%Y.%m.%d)-${CIRCLE_SHA1:0:7}"
+  run git ls-remote --tags origin "refs/tags/${today_tag}"
+  [[ "$output" == *"${today_tag}"* ]]
+}
+
+@test "with PARAM_TAG_REGEX unset, the built-in deploy tag shape is used (#94)" {
+  export PARAM_DATE_FORMAT="%Y.%m.%d"
+  export PARAM_SHA_LENGTH="7"
+  unset PARAM_TAG_REGEX
+  export PARAM_REUSE_EXISTING_TAG="1"
+  old_tag="2020.01.03-${CIRCLE_SHA1:0:7}"
+  git tag "${old_tag}"
+  git push --quiet origin "${old_tag}"
+
+  run push_deploy_tag
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"already has deploy tag ${old_tag}"* ]]
+}

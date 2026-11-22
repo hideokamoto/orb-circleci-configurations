@@ -1,0 +1,49 @@
+description: >
+  Push the deploy tag after a production deploy, then create the GitHub
+  Release from it. The deploy job stays in the consuming config; the branch
+  filter, contexts and serial-group stay in the workflow because orbs cannot
+  carry them. base_revision / head_revision are passed from pipeline values
+  so the job can skip commits that only change agent-skill files or Markdown.
+usage:
+  version: 2.1
+
+  orbs:
+    configurations: hideokamoto/configurations@x.y.z
+
+  jobs:
+    deploy-production:
+      docker:
+        - image: cimg/base:current
+      steps:
+        - checkout
+        - run: echo "deploy here"
+
+  workflows:
+    build-deploy:
+      jobs:
+        - deploy-production:
+            filters:
+              branches:
+                only: main
+        - configurations/tag_release:
+            name: tag-release
+            base_revision: << pipeline.git.base_revision >>
+            head_revision: << pipeline.git.revision >>
+            context:
+              - github
+            requires:
+              - deploy-production
+            filters:
+              branches:
+                only: main
+        - configurations/github_release_from_deploy_tag:
+            name: create-github-release
+            context:
+              - github
+              - circleci
+            requires:
+              - tag-release
+            filters:
+              branches:
+                only: main
+            serial-group: << pipeline.project.slug >>/create-github-release

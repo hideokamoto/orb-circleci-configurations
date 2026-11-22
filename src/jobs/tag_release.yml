@@ -1,0 +1,119 @@
+description: >
+  Push the date-stamped deploy tag ("YYYY.MM.DD-<sha7>" by default) for the
+  current commit after a successful production deploy. Ported from the
+  `tag-release` job of hideokamoto/circleci-configurations'
+  workflows/deployment/cloudflare-workers.yaml, aws-cdk.yaml and
+  aws-cdkd.yaml, which runs as its own job after deploy-production so a
+  failure here (e.g. installing the GitHub CLI) cannot fail the deploy.
+
+  Steps: checkout, skip_unless_changed (halts as a success when every changed
+  path matches skip_pattern, by default agent-skill files under `.claude/`
+  and Markdown; the base revision falls back to the most recent deploy tag
+  when base_revision is empty), gh/setup (git push authentication with the
+  GitHub token), then push_deploy_tag. push_deploy_tag skips when the exact
+  tag already exists, and by default also when the commit already has a
+  deploy tag from an earlier day (hideokamoto/circleci-configurations#94).
+
+  Pass `<< pipeline.git.base_revision >>` and `<< pipeline.git.revision >>`
+  as base_revision / head_revision, `requires` the deploy job, and keep the
+  branch filter and the context holding GITHUB_TOKEN (contents:write) in the
+  consuming workflow; see the tag_release_after_deploy example. Run
+  github_release_from_deploy_tag after this job to create the GitHub
+  Release.
+
+executor: << parameters.executor >>
+resource_class: << parameters.resource_class >>
+
+parameters:
+  executor:
+    type: executor
+    default: base_pinned
+    description: >
+      Executor to run on. Needs git, curl and sudo (gh/setup installs the
+      GitHub CLI); the default digest-pinned cimg/base image has them.
+  resource_class:
+    type: string
+    default: small
+    description: Resource class of the job container.
+  checkout:
+    type: boolean
+    default: true
+    description: >
+      Check out the project first. Set to false only when earlier steps (e.g.
+      pre-steps) already put the repository in the working directory.
+  base_revision:
+    type: string
+    default: ""
+    description: >
+      Revision to diff from for the skip check. Pass
+      `<< pipeline.git.base_revision >>`; when empty, the most recent deploy
+      tag reachable from the head is used.
+  head_revision:
+    type: string
+    default: ""
+    description: >
+      Revision to diff to for the skip check. Pass `<< pipeline.git.revision >>`;
+      when empty, CIRCLE_SHA1 is used.
+  skip_pattern:
+    type: string
+    default: '(^\.claude/|\.md$)'
+    description: >
+      Extended regular expression (grep -E) for paths that alone do not need
+      a deploy tag. The job halts as a success when every changed path
+      matches it.
+  gh_token_env:
+    type: env_var_name
+    default: GITHUB_TOKEN
+    description: >
+      Name of the environment variable holding the GitHub token given to
+      gh/setup (contents:write on this repository).
+  gh_version:
+    type: string
+    default: latest
+    description: >
+      GitHub CLI version gh/setup installs ("latest" or a full version).
+      circleci/github-cli@2.7.2 still queries github.com/cli/cli/releases/latest
+      before installing, so pinning does not avoid that request.
+  date_format:
+    type: string
+    default: "%Y.%m.%d"
+    description: >
+      `date -u` format of the tag's date part. Keep tag_regex and the other
+      commands' tag patterns in sync if this is overridden.
+  sha_length:
+    type: integer
+    default: 7
+    description: Number of leading characters of CIRCLE_SHA1 in the tag.
+  tag_regex:
+    type: string
+    default: '^[0-9]{4}\.[0-9]{2}\.[0-9]{2}-[0-9a-f]{7}$'
+    description: >
+      Extended regular expression a remote tag must fully match to count as
+      an existing deploy tag of this commit (reuse_existing_tag).
+  reuse_existing_tag:
+    type: boolean
+    default: true
+    description: >
+      Do not push a new tag when the commit already has a deploy tag on the
+      remote (hideokamoto/circleci-configurations#94). Set to false to push a
+      new dated tag on every day the job runs, as the pre-orb templates did.
+
+steps:
+  - when:
+      condition: << parameters.checkout >>
+      steps:
+        - checkout
+  - skip_unless_changed:
+      base_revision: << parameters.base_revision >>
+      head_revision: << parameters.head_revision >>
+      fallback: deploy_tag
+      mode: skip_if_only_matches
+      pattern: << parameters.skip_pattern >>
+  - gh/setup:
+      token: << parameters.gh_token_env >>
+      version: << parameters.gh_version >>
+  - push_deploy_tag:
+      date_format: << parameters.date_format >>
+      sha_length: << parameters.sha_length >>
+      tag_regex: << parameters.tag_regex >>
+      reuse_existing_tag: << parameters.reuse_existing_tag >>
