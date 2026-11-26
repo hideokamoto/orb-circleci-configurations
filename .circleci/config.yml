@@ -31,6 +31,9 @@ jobs:
             jq -e '[.workflows.release.jobs[] | keys[0]] | index("orb-tools/publish") == null' /tmp/release-deploy.yml
             jq -e '.workflows.release.jobs[-1].release.requires | index("orb-tools/pack") != null' /tmp/release-deploy.yml
             jq -e '.jobs.release.steps | length > 0' /tmp/release-deploy.yml
+      - run:
+          name: Check release.yml runs bats/run the same way
+          command: bash .circleci/scripts/check-release-gate.sh
 
   # CircleCI passes a boolean parameter to a script's environment as "1", not
   # "true"; this fails when such a parameter has no BATS test using "1".

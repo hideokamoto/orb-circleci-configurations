@@ -21,8 +21,16 @@ workflows:
       - orb-tools/review:
           orb_name: configurations
       - shellcheck/check
+      # Must match the bats/run entry in .circleci/config.yml apart from
+      # filters; check-release-config there fails the pull request otherwise.
       - bats/run:
           path: src/tests
+          # wporg_svn_deploy.bats runs svn against a local svnadmin
+          # repository and syncs with rsync; cimg/base ships neither.
+          setup-steps:
+            - run:
+                name: Install subversion and rsync
+                command: sudo apt-get update -qq && sudo apt-get install -y -qq subversion rsync
       - orb-tools/continue:
           pipeline_number: << pipeline.number >>
           vcs_type: << pipeline.project.type >>
