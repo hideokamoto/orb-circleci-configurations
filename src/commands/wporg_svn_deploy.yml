@@ -11,13 +11,20 @@ description: >
   What it deploys is `build_dir` as given. It does not build or filter
   anything, so pass the same tree that was attached to the GitHub Release
   (for example the unzipped release zip), and every file in it is published,
-  including ones svn's default global-ignores would skip.
+  including ones svn's default global-ignores would skip. A symbolic link in
+  `build_dir` or `assets_dir` fails the step, because rsync would skip it
+  without an error. A file that became a directory, or a directory that
+  became a file, is replaced in the same commit.
 
   Checks before anything is written: the plugin header `Version:` in
   `main_file` and the readme's `Stable tag:` must both equal the release
   version, because WordPress.org serves the version that trunk's Stable tag
   names. A mismatch fails the step instead of publishing a tag that is not
-  served, or serving the wrong one.
+  served, or serving the wrong one. The release version must be a plain
+  version, dot-separated whole numbers without leading zeros (1.2.3), because
+  versions are compared with `sort -V`, which orders those the way PHP's
+  version_compare does and orders pre-release suffixes (1.2.3-rc1) and
+  leading zeros (1.01) differently.
 
   Invoke the job that runs this command with a serial-group (for example
   `serial-group: << pipeline.project.slug >>/wordpress-org-deploy`).
@@ -38,10 +45,11 @@ description: >
   - trunk's Stable tag is newer than the version (an older pipeline's job
     ran or was rerun after a newer one): exit 0 without committing, so
     trunk never moves back to an older version.
-  - tags/<version> exists but trunk's Stable tag is older: the tag was not
-    made by this command, and WordPress.org does not serve it; fail.
-  Versions are compared with `sort -V`, which matches PHP's version_compare
-  for plain X.Y.Z versions.
+  - tags/<version> exists but trunk's Stable tag is older, or names no
+    version (no readme, no Stable tag, or the legacy value "trunk"): the tag
+    was not made by this command, and WordPress.org does not serve it; fail.
+  - trunk's Stable tag is not a plain version: it cannot be compared, so
+    fail without committing.
 
   Credentials: the user name and password are read from the env vars named
   by `username_env` / `password_env` (put them in a context that only the

@@ -44,7 +44,12 @@ module wporg {
   // waiting to run. Skipped: serial-group skipped it.
   type Phase = Pending | Queued | CheckedOut | Done | Failed | Skipped
 
-  // Repository state. trunk = version named by trunk's Stable tag (0 = none).
+  // Repository state. trunk = version named by trunk's Stable tag. 0 stands
+  // for a trunk whose readme names no version (no readme, no Stable tag, or
+  // the legacy value "trunk"); the script's served_version prints nothing
+  // for these, and the script treats that as older than every version when
+  // tags/<v> exists. The script refuses a Stable tag that is not a plain
+  // version (1.2.3-rc1, 1.01) before deciding, so the model has none.
   var trunk: int
   var tags: Set[int]
   var trunkRev: int   // revision of the last commit that changed trunk

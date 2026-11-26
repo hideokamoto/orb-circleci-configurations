@@ -60,11 +60,23 @@ readme_stable_tag() {
         sed -E 's/.*[Ss][Tt][Aa][Bb][Ll][Ee] [Tt][Aa][Gg]:[[:space:]]*//; s/[[:space:]]+$//'
 }
 
+# is_plain_version
+#
+# Returns 0 when $1 is dot-separated whole numbers without leading zeros
+# (1, 1.2, 1.2.3, 10.0.11). For these, `sort -V` orders versions the same
+# way PHP's version_compare() does, which is how WordPress compares them;
+# for pre-release suffixes (1.2.3-rc1) and leading zeros (1.01) the two
+# disagree, so the command accepts only plain versions.
+is_plain_version() {
+    printf '%s' "$1" | grep -Eq '^(0|[1-9][0-9]*)(\.(0|[1-9][0-9]*))*$'
+}
+
 # served_version
 #
-# Prints the version a checked-out trunk serves: its readme's Stable tag,
-# when that is a version number. Prints nothing for an empty trunk, a
-# readme without a Stable tag, or the legacy value "trunk".
+# Prints the Stable tag of a checked-out trunk's readme, which names the
+# version WordPress.org serves. Prints nothing for an empty trunk, a readme
+# without a Stable tag, or the legacy value "trunk": none of these names a
+# version.
 # Arguments:
 #   $1 - the trunk/ directory of the working copy
 served_version() {
@@ -72,7 +84,7 @@ served_version() {
     for readme in "$1/readme.txt" "$1/readme.md"; do
         if [ -f "${readme}" ]; then
             tag="$(readme_stable_tag "${readme}")"
-            if printf '%s' "${tag}" | grep -Eq '^[0-9][0-9A-Za-z.-]*$'; then
+            if [ "${tag}" != "trunk" ]; then
                 printf '%s' "${tag}"
             fi
             return 0
@@ -82,11 +94,40 @@ served_version() {
 
 # version_lt
 #
-# Returns 0 when version $1 is older than version $2 (by `sort -V`, which
-# orders plain X.Y.Z versions the way PHP's version_compare does; the
-# release template only publishes those), 1 otherwise.
+# Returns 0 when version $1 is older than version $2, 1 otherwise. Both must
+# pass is_plain_version, so that `sort -V` agrees with version_compare().
 version_lt() {
     [ "$1" != "$2" ] && [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -n1)" = "$1" ]
+}
+
+# find_symlinks
+#
+# Prints the symbolic links under directory $1, one per line. rsync -r skips
+# them without failing, so the command refuses to publish a tree with any.
+find_symlinks() {
+    find "$1" -type l
+}
+
+# replace_kind_changes
+#
+# Runs in the root of the working copy after rsync. Where a versioned file
+# became a directory or a directory became a file, `svn status` shows "~" and
+# `svn add` fails. For each such path, moves the new item aside, schedules
+# the old node for deletion, and puts the new item back, so that the
+# following `svn add` schedules it as a replacement.
+replace_kind_changes() {
+    local changed path aside
+    changed="$(svn status | { grep '^~' || true; } | cut -c9- | sort)"
+    [ -n "${changed}" ] || return 0
+    aside="$(mktemp -d)"
+    while IFS= read -r path; do
+        # A path inside one replaced earlier is gone with its parent.
+        [ -e "${path}" ] || continue
+        mv "${path}" "${aside}/item"
+        svn rm --quiet --force "${path}@"
+        mv "${aside}/item" "${path}"
+    done <<<"${changed}"
+    rmdir "${aside}"
 }
 
 # ensure_tools
@@ -180,11 +221,25 @@ wporg_svn_deploy() (
     if [ -n "${assets_dir}" ] && [ -d "${assets_dir}" ]; then
         assets_dir="$(cd "${assets_dir}" && pwd)"
     fi
+    local dir links
+    for dir in "${build_dir}" "${assets_dir}"; do
+        if [ -z "${dir}" ] || [ ! -d "${dir}" ]; then
+            continue
+        fi
+        links="$(find_symlinks "${dir}")"
+        if [ -n "${links}" ]; then
+            echo "${dir} contains symbolic links, which would not be published:" >&2
+            printf '%s\n' "${links}" >&2
+            echo "Replace them with the files they point to." >&2
+            return 1
+        fi
+    done
 
     version="$(read_env_var version_env "${PARAM_VERSION_ENV:-RELEASE_VERSION}")"
     version="${version#v}"
-    if ! printf '%s' "${version}" | grep -Eq '^[0-9][0-9A-Za-z.-]*$'; then
-        echo "The version from \$${PARAM_VERSION_ENV:-RELEASE_VERSION} ('${version}') is empty or not a plugin version." >&2
+    if ! is_plain_version "${version}"; then
+        echo "The version from \$${PARAM_VERSION_ENV:-RELEASE_VERSION} ('${version}') is empty or not a plain version such as 1.2.3." >&2
+        echo "Pre-release suffixes and leading zeros are refused: sort -V and PHP's version_compare() order them differently." >&2
         return 1
     fi
 
@@ -249,23 +304,35 @@ wporg_svn_deploy() (
     svn update --quiet --non-interactive --set-depth immediates tags
 
     # The version trunk serves now. specs/wporg_svn_deploy.qnt models the
-    # two checks below. The caller's serial-group keeps two deploy jobs from
-    # running at once and skips an older pipeline's job while a newer one
-    # waits or runs, but an older pipeline's job that starts after the newer
-    # one finished (a rerun, or a slower upstream) still runs; without the
-    # first check it moves trunk back to the older version. Without the
-    # second, a tag created without trunk is reported as deployed.
+    # checks below, with an empty value as version 0. The caller's
+    # serial-group keeps two deploy jobs from running at once and skips an
+    # older pipeline's job while a newer one waits or runs, but an older
+    # pipeline's job that starts after the newer one finished (a rerun, or a
+    # slower upstream) still runs; without the downgrade check it moves trunk
+    # back to the older version. Without the tag check, a tag created without
+    # trunk is reported as deployed.
     local served=""
     served="$(served_version trunk)"
+    if [ -n "${served}" ] && ! is_plain_version "${served}"; then
+        echo "trunk's Stable tag is '${served}', which is not a plain version such as 1.2.3, so it cannot be compared with ${version}." >&2
+        echo "Nothing was committed. Fix trunk by hand." >&2
+        return 1
+    fi
 
     if [ -d "tags/${version}" ]; then
-        if [ -n "${served}" ] && version_lt "${served}" "${version}"; then
+        if [ -z "${served}" ]; then
+            echo "tags/${version} already exists in ${svn_url}, but trunk's readme names no version in Stable tag, so WordPress.org does not serve ${version}." >&2
+            echo "The tag was not created by this command (it commits trunk and the tag together). Fix trunk by hand." >&2
+            return 1
+        fi
+        if version_lt "${served}" "${version}"; then
             echo "tags/${version} already exists in ${svn_url}, but trunk's Stable tag is '${served}', so WordPress.org does not serve ${version}." >&2
             echo "The tag was not created by this command (it commits trunk and the tag together). Fix trunk by hand." >&2
             return 1
         fi
-        # trunk and the tag are committed together, so an existing tag means
-        # this version was already published; a rerun has nothing to do.
+        # trunk and the tag are committed together, so an existing tag with
+        # trunk at this version or newer means it was already published; a
+        # rerun has nothing to do.
         echo "tags/${version} already exists in ${svn_url}; nothing to deploy."
         return 0
     fi
@@ -292,6 +359,7 @@ wporg_svn_deploy() (
         fi
     fi
 
+    replace_kind_changes
     # --no-ignore: publish exactly the build directory, including files that
     # svn's default global-ignores (.DS_Store, *.so, *~ ...) would skip.
     svn add --quiet --force --no-ignore .

@@ -237,7 +237,7 @@ head_revision() {
   unset RELEASE_VERSION
   run wporg_svn_deploy
   [ "$status" -ne 0 ]
-  [[ "$output" == *"empty or not a plugin version"* ]]
+  [[ "$output" == *"empty or not a plain version"* ]]
 }
 
 @test "rejects a version_env that is not a variable name" {
@@ -309,4 +309,111 @@ head_revision() {
   version_lt 1.9.0 1.10.0
   ! version_lt 1.10.0 1.9.0
   ! version_lt 1.2.3 1.2.3
+}
+
+@test "is_plain_version accepts only dot-separated whole numbers without leading zeros" {
+  is_plain_version 1
+  is_plain_version 1.2.3
+  is_plain_version 10.0.11
+  is_plain_version 0.1
+  ! is_plain_version ""
+  ! is_plain_version 1.2.3-rc1
+  ! is_plain_version 1.01
+  ! is_plain_version 1..2
+  ! is_plain_version 1.2.
+  ! is_plain_version trunk
+}
+
+@test "refuses a pre-release release version" {
+  write_plugin 1.2.4-rc1
+  export RELEASE_VERSION="1.2.4-rc1"
+  run wporg_svn_deploy
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"not a plain version"* ]]
+  [ "$(head_revision)" -eq 1 ]
+}
+
+@test "refuses a release version with a leading zero" {
+  write_plugin 1.02
+  export RELEASE_VERSION="1.02"
+  run wporg_svn_deploy
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"not a plain version"* ]]
+}
+
+@test "fails without committing when trunk's Stable tag is not a plain version" {
+  local wc="${TEST_DIR}/rc"
+  svn checkout --quiet "${REPO_URL}/trunk" "${wc}"
+  printf '=== My Plugin ===\nStable tag: 1.2.4-rc1\n' > "${wc}/readme.txt"
+  svn add --quiet "${wc}/readme.txt"
+  svn commit --quiet -m "rc" "${wc}"
+  local before
+  before="$(head_revision)"
+  run wporg_svn_deploy
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Stable tag is '1.2.4-rc1', which is not a plain version"* ]]
+  [ "$(head_revision)" -eq "${before}" ]
+}
+
+@test "fails when tags/<version> exists but trunk has no readme" {
+  svn cp --quiet -m "tag by hand" "${REPO_URL}/trunk" "${REPO_URL}/tags/1.2.3"
+  run wporg_svn_deploy
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"names no version in Stable tag"* ]]
+}
+
+@test "fails when tags/<version> exists but trunk's Stable tag is the legacy value trunk" {
+  local wc="${TEST_DIR}/legacy"
+  svn checkout --quiet "${REPO_URL}/trunk" "${wc}"
+  printf '=== My Plugin ===\nStable tag: trunk\n' > "${wc}/readme.txt"
+  svn add --quiet "${wc}/readme.txt"
+  svn commit --quiet -m "legacy" "${wc}"
+  svn cp --quiet -m "tag by hand" "${REPO_URL}/trunk" "${REPO_URL}/tags/1.2.3"
+  run wporg_svn_deploy
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"names no version in Stable tag"* ]]
+}
+
+@test "fails without checking out when build_dir contains a symbolic link" {
+  ln -s my-plugin.php "${BUILD}/alias.php"
+  run wporg_svn_deploy
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"contains symbolic links"* ]]
+  [[ "$output" == *"alias.php"* ]]
+  [ "$(head_revision)" -eq 1 ]
+}
+
+@test "fails when assets_dir contains a symbolic link" {
+  mkdir -p "${TEST_DIR}/assets"
+  printf 'png' > "${TEST_DIR}/assets/banner-772x250.png"
+  ln -s banner-772x250.png "${TEST_DIR}/assets/icon-128x128.png"
+  export PARAM_ASSETS_DIR="${TEST_DIR}/assets"
+  run wporg_svn_deploy
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"contains symbolic links"* ]]
+  [ "$(head_revision)" -eq 1 ]
+}
+
+@test "replaces a file that became a directory and a directory that became a file" {
+  echo "old" > "${BUILD}/extra"
+  run wporg_svn_deploy
+  [ "$status" -eq 0 ]
+  svn ls "${REPO_URL}/trunk/includes/helper.php" >/dev/null
+
+  mv "${BUILD}/extra" "${TEST_DIR}/extra.old"
+  mkdir "${BUILD}/extra"
+  echo "<?php // new" > "${BUILD}/extra/new.php"
+  mv "${BUILD}/includes" "${TEST_DIR}/includes.old"
+  echo "now a file" > "${BUILD}/includes"
+  write_plugin 1.2.4
+  export RELEASE_VERSION="1.2.4"
+  run wporg_svn_deploy
+  [ "$status" -eq 0 ]
+  [ "$(svn cat "${REPO_URL}/trunk/includes")" = "now a file" ]
+  svn ls "${REPO_URL}/trunk/extra/new.php" >/dev/null
+  [ "$(svn cat "${REPO_URL}/tags/1.2.4/includes")" = "now a file" ]
+  svn ls "${REPO_URL}/tags/1.2.4/extra/new.php" >/dev/null
+  # The earlier tag keeps the old layout.
+  svn ls "${REPO_URL}/tags/1.2.3/includes/helper.php" >/dev/null
+  [ "$(svn cat "${REPO_URL}/tags/1.2.3/extra")" = "old" ]
 }
