@@ -417,3 +417,41 @@ head_revision() {
   svn ls "${REPO_URL}/tags/1.2.3/includes/helper.php" >/dev/null
   [ "$(svn cat "${REPO_URL}/tags/1.2.3/extra")" = "old" ]
 }
+
+@test "expands environment variable references in slug, build_dir, main_file, assets_dir and svn_url" {
+  mv "${BUILD}/my-plugin.php" "${BUILD}/plugin.php"
+  mkdir -p "${TEST_DIR}/assets"
+  printf 'png' > "${TEST_DIR}/assets/icon.png"
+  export WPORG_SLUG="my-plugin" WPORG_ROOT="${TEST_DIR}" WPORG_MAIN="plugin.php" WPORG_URL="${REPO_URL}"
+  export PARAM_SLUG='${WPORG_SLUG}'
+  export PARAM_BUILD_DIR='$WPORG_ROOT/build'
+  export PARAM_MAIN_FILE='${WPORG_MAIN}'
+  export PARAM_ASSETS_DIR='${WPORG_ROOT}/assets'
+  export PARAM_SVN_URL='${WPORG_URL}/'
+  run wporg_svn_deploy
+  [ "$status" -eq 0 ]
+  svn ls "${REPO_URL}/tags/1.2.3/plugin.php" >/dev/null
+  svn ls "${REPO_URL}/assets/icon.png" >/dev/null
+}
+
+@test "fails on a slug whose variable is unset instead of using the text" {
+  unset WPORG_SLUG
+  export PARAM_SLUG='${WPORG_SLUG}'
+  run wporg_svn_deploy
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"slug '' must be"* ]]
+  [ "$(head_revision)" -eq 1 ]
+}
+
+@test "expand_env_refs expands only variable references and evaluates nothing" {
+  export A="x" B="y z"
+  unset C
+  [ "$(expand_env_refs 'p/${A}/$B-q')" = "p/x/y z-q" ]
+  [ "$(expand_env_refs 'plain/path')" = "plain/path" ]
+  [ "$(expand_env_refs '${C}e')" = "e" ]
+  [ "$(expand_env_refs '$1 $A')" = '$1 x' ]
+  [ "$(expand_env_refs '$(touch '"${TEST_DIR}"'/ran)')" = '$(touch '"${TEST_DIR}"'/ran)' ]
+  [ ! -e "${TEST_DIR}/ran" ]
+  [ "$(expand_env_refs '`id` ${A')" = '`id` ${A' ]
+  [ "$(expand_env_refs 'a$')" = 'a$' ]
+}

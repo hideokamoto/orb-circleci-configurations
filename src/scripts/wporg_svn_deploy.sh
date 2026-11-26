@@ -34,6 +34,37 @@ read_env_var() {
     printf '%s' "${!name:-}"
 }
 
+# expand_env_refs
+#
+# Prints $1 with each $NAME or ${NAME} replaced by the value of that
+# environment variable (empty when unset). CircleCI treats parameter values
+# as literals, so this is how a job passes a value it worked out at run time,
+# such as a slug exported to $BASH_ENV by an earlier step. Only plain
+# variable references are expanded and nothing is evaluated: a "$" that does
+# not start a variable name, command substitution and other shell syntax
+# stay as text.
+# Arguments:
+#   $1 - the parameter value
+# Outputs:
+#   The expanded value on stdout.
+expand_env_refs() {
+    local rest="$1" out="" name
+    local braced='^\{([A-Za-z_][A-Za-z0-9_]*)\}(.*)$'
+    local bare='^([A-Za-z_][A-Za-z0-9_]*)(.*)$'
+    while [[ "${rest}" == *'$'* ]]; do
+        out+="${rest%%\$*}"
+        rest="${rest#*\$}"
+        if [[ "${rest}" =~ ${braced} ]] || [[ "${rest}" =~ ${bare} ]]; then
+            name="${BASH_REMATCH[1]}"
+            out+="${!name:-}"
+            rest="${BASH_REMATCH[2]}"
+        else
+            out+='$'
+        fi
+    done
+    printf '%s' "${out}${rest}"
+}
+
 # plugin_header_version
 #
 # Prints the "Version:" value from a plugin's main file header. Like
@@ -195,6 +226,9 @@ set_asset_mime_types() {
 #   PARAM_SVN_URL       - repository URL (default
 #                         https://plugins.svn.wordpress.org/<slug>/)
 #   PARAM_DRY_RUN       - "1"/"true" to stop before the commit
+#   PARAM_SLUG, PARAM_BUILD_DIR, PARAM_MAIN_FILE, PARAM_ASSETS_DIR and
+#   PARAM_SVN_URL may reference environment variables ($NAME or ${NAME}),
+#   which are expanded by expand_env_refs.
 # Outputs:
 #   Progress and `svn status` on stdout, errors on stderr. The password is
 #   never printed and is passed to svn on stdin, not on its command line.
@@ -202,11 +236,12 @@ set_asset_mime_types() {
 #   0 on success, when the tag already exists, or after a dry run;
 #   non-zero on a validation, checkout or commit failure.
 wporg_svn_deploy() (
-    local slug="${PARAM_SLUG:-}"
-    local build_dir="${PARAM_BUILD_DIR:-}"
-    local main_file="${PARAM_MAIN_FILE:-}"
-    local assets_dir="${PARAM_ASSETS_DIR:-}"
-    local svn_url="${PARAM_SVN_URL:-}"
+    local slug build_dir main_file assets_dir svn_url
+    slug="$(expand_env_refs "${PARAM_SLUG:-}")"
+    build_dir="$(expand_env_refs "${PARAM_BUILD_DIR:-}")"
+    main_file="$(expand_env_refs "${PARAM_MAIN_FILE:-}")"
+    assets_dir="$(expand_env_refs "${PARAM_ASSETS_DIR:-}")"
+    svn_url="$(expand_env_refs "${PARAM_SVN_URL:-}")"
     local version username password
 
     if ! printf '%s' "${slug}" | grep -Eq '^[a-z0-9][a-z0-9-]*$'; then
