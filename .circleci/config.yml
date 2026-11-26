@@ -56,6 +56,12 @@ workflows:
           filters: *filters
       - bats/run:
           path: src/tests
+          # wporg_svn_deploy.bats runs svn against a local svnadmin
+          # repository and syncs with rsync; cimg/base ships neither.
+          setup-steps:
+            - run:
+                name: Install subversion and rsync
+                command: sudo apt-get update -qq && sudo apt-get install -y -qq subversion rsync
           filters: *filters
       - check-release-config:
           filters: *filters

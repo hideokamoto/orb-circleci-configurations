@@ -413,6 +413,59 @@ jobs:
             cat synth-output.txt
             grep -qx 'CDK_DEFAULT_ACCOUNT=123456789012' synth-output.txt
             grep -qx 'CDK_DEFAULT_REGION=us-east-1' synth-output.txt
+  test_wporg_svn_deploy:
+    # Exercises wporg_svn_deploy against a throwaway local SVN repository
+    # reached over file:// (never plugins.svn.wordpress.org): a dry run that
+    # commits nothing, a real deploy, and a rerun that hits the
+    # "tag already exists" path. Leaves subversion/rsync to the command
+    # itself, except svnadmin, which only the fixture needs.
+    executor: configurations/base_pinned
+    environment:
+      RELEASE_VERSION: v1.0.0
+      SVN_USERNAME: orb-test
+      SVN_PASSWORD: not-a-real-password
+    steps:
+      - run:
+          name: Create a local WordPress.org-style repository and plugin build
+          command: |
+            set -euo pipefail
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq subversion
+            svnadmin create /tmp/wporg-repo
+            svn mkdir --quiet -m init file:///tmp/wporg-repo/trunk file:///tmp/wporg-repo/tags file:///tmp/wporg-repo/assets
+            mkdir -p /tmp/wporg-build /tmp/wporg-assets
+            printf '<?php\n/**\n * Plugin Name: Orb Test\n * Version: 1.0.0\n */\n' > /tmp/wporg-build/orb-test.php
+            printf '=== Orb Test ===\nStable tag: 1.0.0\n' > /tmp/wporg-build/readme.txt
+            printf 'png' > /tmp/wporg-assets/icon-128x128.png
+      - configurations/wporg_svn_deploy:
+          slug: orb-test
+          build_dir: /tmp/wporg-build
+          assets_dir: /tmp/wporg-assets
+          svn_url: file:///tmp/wporg-repo/
+          dry_run: true
+      - run:
+          name: Verify the dry run committed nothing
+          command: test "$(svnlook youngest /tmp/wporg-repo)" -eq 1
+      - configurations/wporg_svn_deploy:
+          slug: orb-test
+          build_dir: /tmp/wporg-build
+          assets_dir: /tmp/wporg-assets
+          svn_url: file:///tmp/wporg-repo/
+      - run:
+          name: Verify trunk, the tag and assets were committed together
+          command: |
+            set -euo pipefail
+            test "$(svnlook youngest /tmp/wporg-repo)" -eq 2
+            svn cat file:///tmp/wporg-repo/tags/1.0.0/orb-test.php | grep -q 'Version: 1.0.0'
+            svn cat file:///tmp/wporg-repo/trunk/readme.txt | grep -q 'Stable tag: 1.0.0'
+            test "$(svn propget svn:mime-type file:///tmp/wporg-repo/assets/icon-128x128.png)" = image/png
+      - configurations/wporg_svn_deploy:
+          slug: orb-test
+          build_dir: /tmp/wporg-build
+          svn_url: file:///tmp/wporg-repo/
+      - run:
+          name: Verify the rerun skipped the existing tag
+          command: test "$(svnlook youngest /tmp/wporg-repo)" -eq 2
 workflows:
   test-deploy:
     jobs:
@@ -425,6 +478,8 @@ workflows:
       - test_dependency_audit:
           filters: *filters
       - test_cdk_synth:
+          filters: *filters
+      - test_wporg_svn_deploy:
           filters: *filters
       - test_push_deploy_tag:
           filters: *filters
@@ -617,6 +672,7 @@ workflows:
             - test_push_deploy_tag
             - test_tag_release
             - test_cdk_synth
+            - test_wporg_svn_deploy
             - test_cdk_validate
             - test_deploy_cancel
             - test_npm_publish_oidc

@@ -1,0 +1,55 @@
+description: >
+  Publish a built plugin to WordPress.org after the build job. The build job
+  persists the plugin tree and its version; the publish job hands the tree to
+  wporg_svn_deploy. Only the publish job gets the context that holds
+  SVN_USERNAME and SVN_PASSWORD.
+usage:
+  version: 2.1
+
+  orbs:
+    configurations: hideokamoto/configurations@x.y.z
+
+  jobs:
+    build-release:
+      executor: configurations/base_pinned
+      steps:
+        - checkout
+        - run:
+            name: Build the plugin tree
+            command: |
+              set -euo pipefail
+              mkdir -p /tmp/release/plugin
+              git archive HEAD | tar -x -C /tmp/release/plugin
+              echo "RELEASE_VERSION=1.2.3" > /tmp/release/release.env
+        - persist_to_workspace:
+            root: /tmp/release
+            paths: [plugin, release.env]
+    publish-to-wordpress-org:
+      executor: configurations/base_pinned
+      steps:
+        - checkout
+        - attach_workspace:
+            at: /tmp/release
+        - run:
+            name: Export the release version
+            command: cat /tmp/release/release.env | sed 's/^/export /' >> "$BASH_ENV"
+        - configurations/wporg_svn_deploy:
+            slug: my-plugin
+            build_dir: /tmp/release/plugin
+            assets_dir: .wordpress-org
+
+  workflows:
+    release:
+      jobs:
+        - build-release:
+            filters:
+              branches:
+                only: main
+        - publish-to-wordpress-org:
+            context:
+              - wordpress-org-svn
+            requires:
+              - build-release
+            filters:
+              branches:
+                only: main
