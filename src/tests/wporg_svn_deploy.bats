@@ -266,3 +266,47 @@ head_revision() {
   wporg_svn_deploy >/dev/null
   [ "$PWD" = "${TEST_DIR}" ]
 }
+
+@test "does not move trunk back when an older version's job runs after a newer one" {
+  write_plugin 1.2.4
+  export RELEASE_VERSION="1.2.4"
+  run wporg_svn_deploy
+  [ "$status" -eq 0 ]
+  local before
+  before="$(head_revision)"
+  write_plugin 1.2.3
+  export RELEASE_VERSION="1.2.3"
+  run wporg_svn_deploy
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"not moving trunk back"* ]]
+  [ "$(head_revision)" -eq "${before}" ]
+  svn cat "${REPO_URL}/trunk/readme.txt" | grep -q "Stable tag: 1.2.4"
+}
+
+@test "fails when tags/<version> exists but trunk serves an older version" {
+  run wporg_svn_deploy
+  [ "$status" -eq 0 ]
+  svn cp --quiet -m "tag by hand" "${REPO_URL}/trunk" "${REPO_URL}/tags/1.2.4"
+  write_plugin 1.2.4
+  export RELEASE_VERSION="1.2.4"
+  run wporg_svn_deploy
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"trunk's Stable tag is '1.2.3'"* ]]
+}
+
+@test "deploys over a trunk whose Stable tag is the legacy value trunk" {
+  local wc="${TEST_DIR}/legacy"
+  svn checkout --quiet "${REPO_URL}/trunk" "${wc}"
+  printf '=== My Plugin ===\nStable tag: trunk\n' > "${wc}/readme.txt"
+  svn add --quiet "${wc}/readme.txt"
+  svn commit --quiet -m "legacy" "${wc}"
+  run wporg_svn_deploy
+  [ "$status" -eq 0 ]
+  svn ls "${REPO_URL}/tags/1.2.3/" >/dev/null
+}
+
+@test "version_lt compares numerically, not as text" {
+  version_lt 1.9.0 1.10.0
+  ! version_lt 1.10.0 1.9.0
+  ! version_lt 1.2.3 1.2.3
+}

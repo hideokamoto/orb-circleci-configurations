@@ -42,6 +42,22 @@ jobs:
           name: Check boolean environment parameters are tested with "1"
           command: bash .circleci/scripts/check-bool-env-tests.sh
 
+  # Model-checks specs/wporg_svn_deploy.qnt (the wporg_svn_deploy command
+  # against concurrent, failing and rerun release pipelines) with Quint's
+  # simulator.
+  check-quint-spec:
+    docker:
+      - image: cimg/node:26.13.1@sha256:a39bdc3768d19a96b3b8bbf7a31f50cea3b76e81c3071d0112c2186b4d6e4d1c
+    resource_class: medium
+    steps:
+      - checkout
+      - run:
+          name: Install Quint
+          command: npm install -g @informalsystems/quint@0.34.0
+      - run:
+          name: Check the Quint model of wporg_svn_deploy
+          command: bash .circleci/scripts/check-quint-spec.sh
+
 workflows:
   lint-pack:
     jobs:
@@ -67,10 +83,12 @@ workflows:
           filters: *filters
       - check-bool-env-tests:
           filters: *filters
+      - check-quint-spec:
+          filters: *filters
       # Triggers the next workflow in the Orb Development Kit.
       - orb-tools/continue:
           pipeline_number: << pipeline.number >>
           vcs_type: << pipeline.project.type >>
           orb_name: configurations
-          requires: [orb-tools/lint, orb-tools/pack, orb-tools/review, shellcheck/check, bats/run, check-release-config, check-bool-env-tests]
+          requires: [orb-tools/lint, orb-tools/pack, orb-tools/review, shellcheck/check, bats/run, check-release-config, check-bool-env-tests, check-quint-spec]
           filters: *filters

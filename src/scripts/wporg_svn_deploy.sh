@@ -60,6 +60,35 @@ readme_stable_tag() {
         sed -E 's/.*[Ss][Tt][Aa][Bb][Ll][Ee] [Tt][Aa][Gg]:[[:space:]]*//; s/[[:space:]]+$//'
 }
 
+# served_version
+#
+# Prints the version a checked-out trunk serves: its readme's Stable tag,
+# when that is a version number. Prints nothing for an empty trunk, a
+# readme without a Stable tag, or the legacy value "trunk".
+# Arguments:
+#   $1 - the trunk/ directory of the working copy
+served_version() {
+    local readme tag
+    for readme in "$1/readme.txt" "$1/readme.md"; do
+        if [ -f "${readme}" ]; then
+            tag="$(readme_stable_tag "${readme}")"
+            if printf '%s' "${tag}" | grep -Eq '^[0-9][0-9A-Za-z.-]*$'; then
+                printf '%s' "${tag}"
+            fi
+            return 0
+        fi
+    done
+}
+
+# version_lt
+#
+# Returns 0 when version $1 is older than version $2 (by `sort -V`, which
+# orders plain X.Y.Z versions the way PHP's version_compare does; the
+# release template only publishes those), 1 otherwise.
+version_lt() {
+    [ "$1" != "$2" ] && [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -n1)" = "$1" ]
+}
+
 # ensure_tools
 #
 # Installs subversion and rsync with apt-get when either is missing (cimg/base
@@ -219,10 +248,27 @@ wporg_svn_deploy() (
     svn update --quiet --non-interactive --set-depth infinity trunk
     svn update --quiet --non-interactive --set-depth immediates tags
 
+    # The version trunk serves now. specs/wporg_svn_deploy.qnt models the
+    # two checks below: without them, a deploy job of an older pipeline that
+    # runs (or is rerun) after a newer one moves trunk back to the older
+    # version, and a tag created without trunk is reported as deployed.
+    local served=""
+    served="$(served_version trunk)"
+
     if [ -d "tags/${version}" ]; then
+        if [ -n "${served}" ] && version_lt "${served}" "${version}"; then
+            echo "tags/${version} already exists in ${svn_url}, but trunk's Stable tag is '${served}', so WordPress.org does not serve ${version}." >&2
+            echo "The tag was not created by this command (it commits trunk and the tag together). Fix trunk by hand." >&2
+            return 1
+        fi
         # trunk and the tag are committed together, so an existing tag means
         # this version was already published; a rerun has nothing to do.
         echo "tags/${version} already exists in ${svn_url}; nothing to deploy."
+        return 0
+    fi
+
+    if [ -n "${served}" ] && version_lt "${version}" "${served}"; then
+        echo "trunk already serves ${served}, which is newer than ${version}; not moving trunk back. Nothing was committed."
         return 0
     fi
 
