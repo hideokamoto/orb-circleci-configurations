@@ -51,6 +51,13 @@ description: >
   - trunk's Stable tag is not a plain version: it cannot be compared, so
     fail without committing.
 
+  CircleCI passes parameter values as literal text, so `slug`, `build_dir`,
+  `main_file`, `assets_dir` and `svn_url` may reference environment variables
+  as $NAME or ${NAME}; the command expands them when it runs. That lets a
+  shared job pass values it works out at run time, such as a slug from a
+  project environment variable or a path exported to $BASH_ENV. Nothing else
+  is evaluated, and an unset variable expands to nothing.
+
   Credentials: the user name and password are read from the env vars named
   by `username_env` / `password_env` (put them in a context that only the
   deploy job uses). The password is passed to svn with --password-from-stdin
@@ -68,26 +75,30 @@ parameters:
   slug:
     type: string
     description: >
-      The plugin's WordPress.org slug (lowercase letters, digits, hyphens).
-      Used for the default svn_url and the default main_file.
+      The plugin's WordPress.org slug (lowercase letters, digits, hyphens),
+      or a reference to an environment variable that holds it, such as
+      ${PLUGIN_WPORG_SLUG}. Used for the default svn_url and the default
+      main_file.
   build_dir:
     type: string
     description: >
       Directory whose contents become trunk/. Files in trunk/ that are not in
-      this directory are deleted.
+      this directory are deleted. May reference environment variables.
   main_file:
     type: string
     default: ""
     description: >
       Main plugin file, relative to build_dir, whose header `Version:` is
-      checked. Empty means "<slug>.php".
+      checked. Empty means "<slug>.php". May reference environment
+      variables.
   assets_dir:
     type: string
     default: ""
     description: >
       Directory synced into the repository's top-level assets/ (banners,
       icons, screenshots). Empty leaves assets/ untouched; a path that does
-      not exist is reported and also leaves assets/ untouched.
+      not exist is reported and also leaves assets/ untouched. May
+      reference environment variables.
   version_env:
     type: env_var_name
     default: RELEASE_VERSION
@@ -110,7 +121,8 @@ parameters:
     default: ""
     description: >
       Repository URL. Empty means https://plugins.svn.wordpress.org/<slug>/.
-      Mainly for tests against a local file:// repository.
+      Mainly for tests against a local file:// repository. May reference
+      environment variables.
   dry_run:
     type: boolean
     default: false
