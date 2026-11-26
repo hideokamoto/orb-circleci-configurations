@@ -249,9 +249,12 @@ wporg_svn_deploy() (
     svn update --quiet --non-interactive --set-depth immediates tags
 
     # The version trunk serves now. specs/wporg_svn_deploy.qnt models the
-    # two checks below: without them, a deploy job of an older pipeline that
-    # runs (or is rerun) after a newer one moves trunk back to the older
-    # version, and a tag created without trunk is reported as deployed.
+    # two checks below. The caller's serial-group keeps two deploy jobs from
+    # running at once and skips an older pipeline's job while a newer one
+    # waits or runs, but an older pipeline's job that starts after the newer
+    # one finished (a rerun, or a slower upstream) still runs; without the
+    # first check it moves trunk back to the older version. Without the
+    # second, a tag created without trunk is reported as deployed.
     local served=""
     served="$(served_version trunk)"
 

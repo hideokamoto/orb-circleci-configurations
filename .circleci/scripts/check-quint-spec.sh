@@ -2,9 +2,11 @@
 # Checks specs/wporg_svn_deploy.qnt, the Quint model of the wporg_svn_deploy
 # command's interaction with concurrent, failing and rerun release pipelines.
 #
-# - as_implemented: the simulator must find no violation of `safety`.
-# - unguarded: the simulator must find one. If it stops failing, the model
-#   has lost the behavior the command's version checks guard against.
+# - as_implemented (serial-group + the command's version checks): the
+#   simulator must find no violation of `safety`.
+# - unguarded (neither) and serial_only (serial-group alone): the simulator
+#   must find one. If either stops failing, the model has lost the behavior
+#   that the serial-group or the version checks guard against.
 #
 # The seed is fixed so a run is reproducible. Usage: check-quint-spec.sh
 # Requires quint on PATH (npm install -g @informalsystems/quint).
@@ -21,10 +23,16 @@ if ! "${run[@]}" --main=as_implemented "${spec}"; then
 fi
 echo "ok  as_implemented: no violation of safety found"
 
-if "${run[@]}" --main=unguarded "${spec}" > /tmp/quint-unguarded.log 2>&1; then
-    cat /tmp/quint-unguarded.log
-    echo "NG  unguarded: expected a violation of safety, found none." >&2
-    exit 1
-fi
-grep -q "violation" /tmp/quint-unguarded.log || { cat /tmp/quint-unguarded.log; echo "NG  unguarded: quint failed without reporting a violation." >&2; exit 1; }
-echo "ok  unguarded: violation of safety found, as expected"
+for main in unguarded serial_only; do
+    if "${run[@]}" --main="${main}" "${spec}" > "/tmp/quint-${main}.log" 2>&1; then
+        cat "/tmp/quint-${main}.log"
+        echo "NG  ${main}: expected a violation of safety, found none." >&2
+        exit 1
+    fi
+    if ! grep -q "violation" "/tmp/quint-${main}.log"; then
+        cat "/tmp/quint-${main}.log"
+        echo "NG  ${main}: quint failed without reporting a violation." >&2
+        exit 1
+    fi
+    echo "ok  ${main}: violation of safety found, as expected"
+done

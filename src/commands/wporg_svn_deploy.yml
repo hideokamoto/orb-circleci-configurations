@@ -19,9 +19,19 @@ description: >
   names. A mismatch fails the step instead of publishing a tag that is not
   served, or serving the wrong one.
 
-  Reruns and out-of-order jobs are safe. specs/wporg_svn_deploy.qnt models
-  the command against release pipelines whose deploy jobs interleave, fail,
-  lose the commit's response and are rerun, and CI model-checks it.
+  Invoke the job that runs this command with a serial-group (for example
+  `serial-group: << pipeline.project.slug >>/wordpress-org-deploy`).
+  serial-group is a key of the job's invocation in the workflow, so a
+  command cannot set it. With it,
+  two deploy jobs never commit at the same time (the second would fail on an
+  out-of-date commit) and an older pipeline's job is skipped while a newer
+  one waits or runs. CircleCI documents nothing about an older pipeline's
+  job that starts after the newer one has finished, such as a rerun, so the
+  command also checks versions itself.
+
+  specs/wporg_svn_deploy.qnt models the command against release pipelines
+  whose deploy jobs run with or without the serial-group, fail, lose the
+  commit's response and are rerun; CI model-checks it.
   - tags/<version> already exists: trunk and the tag are committed
     together, so the version is already published; exit 0 without
     committing.

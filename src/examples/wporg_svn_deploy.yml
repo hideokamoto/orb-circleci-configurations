@@ -2,7 +2,10 @@ description: >
   Publish a built plugin to WordPress.org after the build job. The build job
   persists the plugin tree and its version; the publish job hands the tree to
   wporg_svn_deploy. Only the publish job gets the context that holds
-  SVN_USERNAME and SVN_PASSWORD.
+  SVN_USERNAME and SVN_PASSWORD. The serial-group keeps two pipelines from
+  publishing at once and skips an older pipeline's publish job while a
+  newer one waits or runs. It is a key of the job's invocation in the
+  workflow, so the command cannot set it.
 usage:
   version: 2.1
 
@@ -50,6 +53,7 @@ usage:
               - wordpress-org-svn
             requires:
               - build-release
+            serial-group: << pipeline.project.slug >>/wordpress-org-deploy
             filters:
               branches:
                 only: main
