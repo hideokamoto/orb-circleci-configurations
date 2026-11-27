@@ -113,6 +113,15 @@ teardown() {
   grep -qF 'npm install --global @go-to-k/cdkd@0.280.15' "$CALL_LOG"
 }
 
+@test "main rejects latest before npm install" {
+  export PARAM_VERSION="latest"
+  source "${ORB_SRC}/scripts/install_cdkd.sh"
+  run main
+  [ "$status" -eq 1 ]
+  echo "$output" | grep -q 'must be an exact version'
+  [ ! -s "$CALL_LOG" ]
+}
+
 @test "script does not auto-run main when sourced under bats-core" {
   # If main() ran on source, the call log would already contain an npm
   # invocation before any test body calls install_cdkd/main explicitly.

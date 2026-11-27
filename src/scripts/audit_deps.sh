@@ -17,6 +17,16 @@
 
 set -uo pipefail
 
+# Succeeds when $1 is an exact pnpm semver version (no dist-tag, range, alias
+# or protocol). npm global install accepts pnpm@npm:evil as an alias; only a
+# plain version is safe here.
+is_exact_pnpm_version() {
+  local num='(0|[1-9][0-9]*)'
+  local pre='(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)'
+  local re="^${num}\\.${num}\\.${num}(-${pre}(\\.${pre})*)?$"
+  [[ "$1" =~ ${re} ]]
+}
+
 detect_pm() {
   # An actual npm lockfile (package-lock.json/npm-shrinkwrap.json) outranks
   # bun/yarn, same as before — this only changes which check runs last: a
@@ -86,7 +96,11 @@ case "$DEP_AUDIT_PM" in
       # Use the packageManager pin when present: stock pnpm 12's default
       # minimumReleaseAge makes installs fail on freshly released packages.
       PNPM_VERSION="$(node -p "require('./package.json').packageManager?.split('@')[1] ?? ''" 2>/dev/null || true)"
-      PNPM_VERSION="${PNPM_VERSION:-latest}"
+      PNPM_VERSION="${PNPM_VERSION%%+*}"
+      if ! is_exact_pnpm_version "${PNPM_VERSION}"; then
+        echo "[dependency-audit] packageManager must pin an exact pnpm version (got '${PNPM_VERSION:-}'); refusing to run npm install -g pnpm@<unpinned>" >&2
+        exit 2
+      fi
       echo "[dependency-audit] installing pnpm@${PNPM_VERSION}"
       sudo npm install -g "pnpm@${PNPM_VERSION}"
     fi

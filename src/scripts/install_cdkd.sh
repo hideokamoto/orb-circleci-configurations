@@ -16,6 +16,16 @@ set -euo pipefail
 # can point this at a stub.
 CIRCLECI_CLI="${CIRCLECI_CLI:-/usr/bin/circleci}"
 
+# Arguments: $1 - semver version string.
+# Returns 0 when $1 is an exact version, not a range or dist-tag.
+is_exact_version() {
+  local num='(0|[1-9][0-9]*)'
+  local pre='(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)'
+  local build='[0-9A-Za-z-]+'
+  local re="^${num}\\.${num}\\.${num}(-${pre}(\\.${pre})*)?(\\+${build}(\\.${build})*)?$"
+  [[ "$1" =~ ${re} ]]
+}
+
 # Installs the given cdkd version globally via npm and prints the
 # installed CLI's version, so the step log confirms what actually landed.
 #
@@ -50,6 +60,11 @@ install_cdkd() {
 main() {
     local version
     version="$("$CIRCLECI_CLI" env subst "${PARAM_VERSION}")"
+
+    if ! is_exact_version "${version}"; then
+        echo "install_cdkd: version must be an exact version (got '${version}')." >&2
+        exit 1
+    fi
 
     install_cdkd "${version}"
 }

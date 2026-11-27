@@ -47,7 +47,7 @@ publish() {
   audience="$("${cli}" env subst "${PARAM_AUDIENCE}")"
 
   local npm_id_token
-  npm_id_token="$("${cli}" run oidc get --claims "{\"aud\": \"${audience}\"}")"
+  npm_id_token="$("${cli}" run oidc get --claims "$(jq -cn --arg aud "$audience" '{aud:$aud}')")"
 
   # Fail fast, before `npm publish` turns an empty token into an opaque
   # registry error. The token value itself is never echoed here or below --
@@ -72,8 +72,12 @@ publish() {
   # for CircleCI, so the flag is a guaranteed no-op there. Package
   # visibility (public vs restricted) is controlled by the package's own
   # publishConfig.access, not by this command.
+  # PARAM_PUBLISH_COMMAND is already the step's environment value. Running
+  # env subst here would paste each expanded token into the command string and
+  # bash -c would parse that text as shell, so a metacharacter in an env value
+  # becomes code. The publish command expands \$VAR references itself.
   local cmd
-  cmd="$("${cli}" env subst "${PARAM_PUBLISH_COMMAND}")"
+  cmd="${PARAM_PUBLISH_COMMAND}"
   # Every non-interactive bash re-sources $BASH_ENV on startup, so a legacy
   # `export NPM_TOKEN=...` an earlier step appended there would come back in
   # the shell that runs publish_command -- and again in any bash that command

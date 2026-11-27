@@ -31,6 +31,7 @@ teardown() {
   grep -qx "npm install --prefix ${RELEASE_TOOLS_DIR} --ignore-scripts --no-audit --no-fund semantic-release@25.0.9 conventional-changelog-conventionalcommits@9.3.1" "${NPM_LOG}"
   path_after="$(bash -c 'source "$1" && printf %s "$PATH"' _ "${BASH_ENV}")"
   [[ "$path_after" == "${RELEASE_TOOLS_DIR}/node_modules/.bin:"* ]]
+  bash -c 'source "$1" && command -v ls >/dev/null' _ "${BASH_ENV}"
 }
 
 @test "PATH export survives source when RELEASE_TOOLS_DIR contains shell metacharacters" {
@@ -44,6 +45,7 @@ teardown() {
   [ ! -e "should-not-run" ]
   path_after="$(bash -c 'source "$1" && printf %s "$PATH"' _ "${BASH_ENV}")"
   [[ "$path_after" == "${RELEASE_TOOLS_DIR}/node_modules/.bin:"* ]]
+  bash -c 'source "$1" && command -v ls >/dev/null' _ "${BASH_ENV}"
 }
 
 @test "adds pinned extra packages, scoped or not" {
