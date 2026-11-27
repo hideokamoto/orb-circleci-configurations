@@ -29,7 +29,7 @@ teardown() {
   run bash "${SCRIPT}"
   [ "$status" -eq 0 ]
   grep -qx "npm install --prefix ${RELEASE_TOOLS_DIR} --ignore-scripts --no-audit --no-fund semantic-release@25.0.9 conventional-changelog-conventionalcommits@9.3.1" "${NPM_LOG}"
-  grep -qF "export PATH=\"${RELEASE_TOOLS_DIR}/node_modules/.bin:\${PATH}\"" "${BASH_ENV}"
+  grep -qF "export PATH=${RELEASE_TOOLS_DIR}/node_modules/.bin:\${PATH}" "${BASH_ENV}"
 }
 
 @test "adds pinned extra packages, scoped or not" {
@@ -101,6 +101,16 @@ teardown() {
   run bash "${SCRIPT}"
   [ "$status" -ne 0 ]
   [ ! -s "${NPM_LOG}" ]
+}
+
+@test "BASH_ENV PATH export survives a prefix containing shell metacharacters" {
+  export RELEASE_TOOLS_DIR="${WORK}/evil\"; \$(touch \"\${WORK}/should-not-run\"); echo \""
+  run bash "${SCRIPT}"
+  [ "$status" -eq 0 ]
+  bash -c 'source "$1"' _ "${BASH_ENV}"
+  [ ! -e "${WORK}/should-not-run" ]
+  result="$(bash -c 'source "$1" && printf %s "$PATH"' _ "${BASH_ENV}")"
+  [[ "${result}" == *"${RELEASE_TOOLS_DIR}/node_modules/.bin:"* ]]
 }
 
 @test "accepts SemVer prerelease and build metadata in extra packages" {
