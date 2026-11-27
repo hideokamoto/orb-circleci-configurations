@@ -565,7 +565,8 @@ STUB
   run bash "$PAYLOAD_SCRIPT"
   [ "$status" -eq 0 ]
   ! grep -q 'RELEASE_NOTES_SOURCE' "$BASH_ENV" || false
-  grep -qF "export DEPLOY_DIFF_PAYLOAD_FILE=${PAYLOAD_FILE}" "$BASH_ENV"
+  payload_from_env="$(bash -c 'source "$1" && printf %s "$DEPLOY_DIFF_PAYLOAD_FILE"' _ "$BASH_ENV")"
+  [ "$payload_from_env" = "$PAYLOAD_FILE" ]
   [ -f "$PAYLOAD_FILE" ]
   [ "$(jq -r '.org_id' "$PAYLOAD_FILE")" = "org-abc" ]
   [ "$(jq -r '.diff.commit_messages | length' "$PAYLOAD_FILE")" -eq 1 ]
@@ -621,7 +622,8 @@ STUB
 
   run bash "$FETCH_SCRIPT"
   [ "$status" -eq 0 ]
-  grep -qF "export RELEASE_NOTES_FILE=${TEST_DIR}/release-notes.md" "$BASH_ENV"
+  notes_file_from_env="$(bash -c 'source "$1" && printf %s "$RELEASE_NOTES_FILE"' _ "$BASH_ENV")"
+  [ "$notes_file_from_env" = "${TEST_DIR}/release-notes.md" ]
   grep -q '^export RELEASE_NOTES_SOURCE=deploy-diff-summaries$' "$BASH_ENV"
   [ "$(cat "${TEST_DIR}/release-notes.md")" = "Notable changes this release." ]
 }

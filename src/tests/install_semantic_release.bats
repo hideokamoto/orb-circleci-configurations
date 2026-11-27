@@ -29,7 +29,9 @@ teardown() {
   run bash "${SCRIPT}"
   [ "$status" -eq 0 ]
   grep -qx "npm install --prefix ${RELEASE_TOOLS_DIR} --ignore-scripts --no-audit --no-fund semantic-release@25.0.9 conventional-changelog-conventionalcommits@9.3.1" "${NPM_LOG}"
-  grep -qF "export PATH=${RELEASE_TOOLS_DIR}/node_modules/.bin:\${PATH}" "${BASH_ENV}"
+  path_after="$(bash -c 'source "$1" && printf %s "$PATH"' _ "${BASH_ENV}")"
+  [[ "$path_after" == "${RELEASE_TOOLS_DIR}/node_modules/.bin:"* ]]
+  bash -c 'source "$1" && command -v ls >/dev/null' _ "${BASH_ENV}"
 }
 
 @test "adds pinned extra packages, scoped or not" {

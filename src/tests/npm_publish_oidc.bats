@@ -175,5 +175,18 @@ SCRIPT
 
   [ "$status" -eq 0 ]
   run cat "${STUB_CLI_ARGS_FILE}"
-  [[ "$output" == *'run oidc get --claims {"aud": "npm:custom-registry.example.com"}'* ]]
+  [[ "$output" == *'run oidc get --claims {"aud":"npm:custom-registry.example.com"}'* ]]
 }
+
+@test "OIDC claims JSON is not extended when audience contains a double quote" {
+  export STUB_OIDC_TOKEN="token-for-jq-claims"
+  export PARAM_AUDIENCE='npm:evil","extra":"injected'
+  export PARAM_PUBLISH_COMMAND="true"
+
+  run bash "${SCRIPT}"
+
+  [ "$status" -eq 0 ]
+  run cat "${STUB_CLI_ARGS_FILE}"
+  [[ "$output" == *'run oidc get --claims {"aud":"npm:evil\",\"extra\":\"injected"}'* ]]
+}
+

@@ -175,6 +175,31 @@ EOF
   grep -q 'CHUNK_AUDIT_FIX_SUMMARY' "$BASH_ENV"
 }
 
+@test "audit_deps.sh refuses to npm install -g pnpm when packageManager is not an exact version" {
+  npm_only="${WORK}/npm-only-bin"
+  mkdir -p "$npm_only"
+  cp "${STUBBIN}/npm" "$npm_only/"
+  export PATH="${npm_only}:/usr/bin:/bin"
+  printf '{"packageManager":"pnpm@npm:evil-pkg@1.0.0"}\n' >package.json
+  touch pnpm-lock.yaml
+  run bash "${REPO_ROOT}/src/scripts/audit_deps.sh"
+  [ "$status" -eq 2 ]
+  echo "$output" | grep -q 'must pin an exact pnpm version'
+  ! grep -qx 'pnpm audit --audit-level=high' "$STUB_LOG"
+}
+
+@test "audit_deps.sh refuses pnpm global install when packageManager is missing a pin" {
+  npm_only="${WORK}/npm-only-bin"
+  mkdir -p "$npm_only"
+  cp "${STUBBIN}/npm" "$npm_only/"
+  export PATH="${npm_only}:/usr/bin:/bin"
+  printf '{}\n' >package.json
+  touch pnpm-lock.yaml
+  run bash "${REPO_ROOT}/src/scripts/audit_deps.sh"
+  [ "$status" -eq 2 ]
+  echo "$output" | grep -q 'must pin an exact pnpm version'
+}
+
 @test "chunk_audit_fix.sh skips cleanly when DEP_AUDIT_RESULT is not 'failed'" {
   # Simulates a caller-defined job where some unrelated step fails after a
   # *successful* audit: on_fail still runs this script, but DEP_AUDIT_PM
