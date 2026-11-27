@@ -127,7 +127,7 @@ main() {
 
   if summary="$(poll_for_summary "$payload_file" "$max_polls" "$poll_interval")"; then
     printf '%s\n' "$summary" > "$output_file"
-    echo "export RELEASE_NOTES_FILE=\"$output_file\"" >> "$BASH_ENV"
+    printf 'export RELEASE_NOTES_FILE=%q\n' "$output_file" >> "$BASH_ENV"
     echo "export RELEASE_NOTES_SOURCE=deploy-diff-summaries" >> "$BASH_ENV"
     echo "Deploy Diff Summaries succeeded; release notes written to $output_file."
   else

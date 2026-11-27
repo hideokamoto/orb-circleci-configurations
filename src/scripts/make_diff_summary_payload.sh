@@ -360,7 +360,7 @@ main() {
   fi
 
   echo "Diff summary payload size: $(wc -c < "$payload_file") bytes"
-  echo "export DEPLOY_DIFF_PAYLOAD_FILE=\"$payload_file\"" >> "$BASH_ENV"
+  printf 'export DEPLOY_DIFF_PAYLOAD_FILE=%q\n' "$payload_file" >> "$BASH_ENV"
 }
 
 # Will not run if sourced for bats-core tests.

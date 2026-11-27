@@ -565,7 +565,7 @@ STUB
   run bash "$PAYLOAD_SCRIPT"
   [ "$status" -eq 0 ]
   ! grep -q 'RELEASE_NOTES_SOURCE' "$BASH_ENV" || false
-  grep -q "export DEPLOY_DIFF_PAYLOAD_FILE=\"${PAYLOAD_FILE}\"" "$BASH_ENV"
+  grep -qF "export DEPLOY_DIFF_PAYLOAD_FILE=${PAYLOAD_FILE}" "$BASH_ENV"
   [ -f "$PAYLOAD_FILE" ]
   [ "$(jq -r '.org_id' "$PAYLOAD_FILE")" = "org-abc" ]
   [ "$(jq -r '.diff.commit_messages | length' "$PAYLOAD_FILE")" -eq 1 ]
@@ -621,7 +621,46 @@ STUB
 
   run bash "$FETCH_SCRIPT"
   [ "$status" -eq 0 ]
-  grep -q "export RELEASE_NOTES_FILE=\"${TEST_DIR}/release-notes.md\"" "$BASH_ENV"
+  grep -qF "export RELEASE_NOTES_FILE=${TEST_DIR}/release-notes.md" "$BASH_ENV"
   grep -q '^export RELEASE_NOTES_SOURCE=deploy-diff-summaries$' "$BASH_ENV"
   [ "$(cat "${TEST_DIR}/release-notes.md")" = "Notable changes this release." ]
+}
+
+@test "make_diff_summary_payload BASH_ENV export survives a path containing command substitution" {
+  commit_file "a.txt" "hello"
+  BASE_SHA="$(git rev-parse HEAD)"
+  commit_file "b.txt" "world"
+  HEAD_SHA="$(git rev-parse HEAD)"
+
+  export PARAM_BASE_REF="$BASE_SHA"
+  export PARAM_HEAD_REF="$HEAD_SHA"
+  PAYLOAD_FILE="${TEST_DIR}/evil/\$(touch \"${TEST_DIR}/should-not-run\")/payload.json"
+  mkdir -p "$(dirname "$PAYLOAD_FILE")"
+  export DEPLOY_DIFF_PAYLOAD_FILE="$PAYLOAD_FILE"
+
+  run bash "$PAYLOAD_SCRIPT"
+  [ "$status" -eq 0 ]
+  bash -c 'source "$1"' _ "$BASH_ENV"
+  [ ! -e "${TEST_DIR}/should-not-run" ]
+  result="$(bash -c 'source "$1" && printf %s "$DEPLOY_DIFF_PAYLOAD_FILE"' _ "$BASH_ENV")"
+  [ "$result" = "$PAYLOAD_FILE" ]
+}
+
+@test "fetch_deploy_diff_summary BASH_ENV export survives a path containing command substitution" {
+  echo '{}' > "${TEST_DIR}/payload.json"
+  export DEPLOY_DIFF_PAYLOAD_FILE="${TEST_DIR}/payload.json"
+  export STUB_CIRCLECI_ID="summary-42"
+  export STUB_CIRCLECI_PHASE="ended"
+  export STUB_CIRCLECI_SUMMARY="notes"
+  export PARAM_OUTPUT_FILE="${TEST_DIR}/notes/\$(touch \"${TEST_DIR}/should-not-run\").md"
+  mkdir -p "$(dirname "${PARAM_OUTPUT_FILE}")"
+  export PARAM_MAX_POLLS="5"
+  export PARAM_POLL_INTERVAL="0"
+
+  run bash "$FETCH_SCRIPT"
+  [ "$status" -eq 0 ]
+  bash -c 'source "$1"' _ "$BASH_ENV"
+  [ ! -e "${TEST_DIR}/should-not-run" ]
+  result="$(bash -c 'source "$1" && printf %s "$RELEASE_NOTES_FILE"' _ "$BASH_ENV")"
+  [ "$result" = "${PARAM_OUTPUT_FILE}" ]
 }
