@@ -29,7 +29,21 @@ teardown() {
   run bash "${SCRIPT}"
   [ "$status" -eq 0 ]
   grep -qx "npm install --prefix ${RELEASE_TOOLS_DIR} --ignore-scripts --no-audit --no-fund semantic-release@25.0.9 conventional-changelog-conventionalcommits@9.3.1" "${NPM_LOG}"
-  grep -qF "export PATH=\"${RELEASE_TOOLS_DIR}/node_modules/.bin:\${PATH}\"" "${BASH_ENV}"
+  path_after="$(bash -c 'source "$1" && printf %s "$PATH"' _ "${BASH_ENV}")"
+  [[ "$path_after" == "${RELEASE_TOOLS_DIR}/node_modules/.bin:"* ]]
+}
+
+@test "PATH export survives source when RELEASE_TOOLS_DIR contains shell metacharacters" {
+  export RELEASE_TOOLS_DIR="${WORK}/evil-\$(touch should-not-run)"
+  mkdir -p "${RELEASE_TOOLS_DIR}"
+  run bash "${SCRIPT}"
+  [ "$status" -eq 0 ]
+  marker_dir="$(mktemp -d)"
+  ( cd "$marker_dir" && bash -c 'source "$1"' _ "${BASH_ENV}" )
+  [ ! -e "$marker_dir/should-not-run" ]
+  [ ! -e "should-not-run" ]
+  path_after="$(bash -c 'source "$1" && printf %s "$PATH"' _ "${BASH_ENV}")"
+  [[ "$path_after" == "${RELEASE_TOOLS_DIR}/node_modules/.bin:"* ]]
 }
 
 @test "adds pinned extra packages, scoped or not" {

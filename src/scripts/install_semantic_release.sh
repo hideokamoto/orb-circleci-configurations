@@ -78,7 +78,7 @@ install_tools() {
 
   # Later steps (the release command run by npm_publish_oidc) find the pinned
   # tools first on PATH, ahead of any copy in the project's node_modules.
-  echo "export PATH=\"${prefix}/node_modules/.bin:\${PATH}\"" >> "${BASH_ENV}"
+  printf 'export PATH=%q\n' "${prefix}/node_modules/.bin:\$PATH" >> "${BASH_ENV}"
 }
 
 # Script entry point, run only when this file is executed directly (not

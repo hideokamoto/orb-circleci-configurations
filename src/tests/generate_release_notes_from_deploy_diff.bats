@@ -565,7 +565,8 @@ STUB
   run bash "$PAYLOAD_SCRIPT"
   [ "$status" -eq 0 ]
   ! grep -q 'RELEASE_NOTES_SOURCE' "$BASH_ENV" || false
-  grep -q "export DEPLOY_DIFF_PAYLOAD_FILE=\"${PAYLOAD_FILE}\"" "$BASH_ENV"
+  payload_from_env="$(bash -c 'source "$1" && printf %s "$DEPLOY_DIFF_PAYLOAD_FILE"' _ "$BASH_ENV")"
+  [ "$payload_from_env" = "$PAYLOAD_FILE" ]
   [ -f "$PAYLOAD_FILE" ]
   [ "$(jq -r '.org_id' "$PAYLOAD_FILE")" = "org-abc" ]
   [ "$(jq -r '.diff.commit_messages | length' "$PAYLOAD_FILE")" -eq 1 ]
@@ -621,7 +622,52 @@ STUB
 
   run bash "$FETCH_SCRIPT"
   [ "$status" -eq 0 ]
-  grep -q "export RELEASE_NOTES_FILE=\"${TEST_DIR}/release-notes.md\"" "$BASH_ENV"
+  notes_file_from_env="$(bash -c 'source "$1" && printf %s "$RELEASE_NOTES_FILE"' _ "$BASH_ENV")"
+  [ "$notes_file_from_env" = "${TEST_DIR}/release-notes.md" ]
   grep -q '^export RELEASE_NOTES_SOURCE=deploy-diff-summaries$' "$BASH_ENV"
   [ "$(cat "${TEST_DIR}/release-notes.md")" = "Notable changes this release." ]
+}
+
+@test "fetch main BASH_ENV export does not execute metacharacters in output_file path" {
+  echo '{}' > "${TEST_DIR}/payload.json"
+  export DEPLOY_DIFF_PAYLOAD_FILE="${TEST_DIR}/payload.json"
+  export STUB_CIRCLECI_ID="summary-43"
+  export STUB_CIRCLECI_PHASE="ended"
+  export STUB_CIRCLECI_SUMMARY="Safe export check."
+  malicious_notes="${TEST_DIR}/notes-\$(touch should-not-run).md"
+  export PARAM_OUTPUT_FILE="$malicious_notes"
+  export PARAM_MAX_POLLS="5"
+  export PARAM_POLL_INTERVAL="0"
+
+  run bash "$FETCH_SCRIPT"
+  [ "$status" -eq 0 ]
+  marker_dir="$(mktemp -d)"
+  ( cd "$marker_dir" && bash -c 'source "$1"' _ "$BASH_ENV" )
+  [ ! -e "$marker_dir/should-not-run" ]
+  [ ! -e "should-not-run" ]
+  notes_file_from_env="$(bash -c 'source "$1" && printf %s "$RELEASE_NOTES_FILE"' _ "$BASH_ENV")"
+  [ "$notes_file_from_env" = "$malicious_notes" ]
+  [ "$(cat "$malicious_notes")" = "Safe export check." ]
+}
+
+@test "payload main BASH_ENV export does not execute metacharacters in payload path" {
+  commit_file "a.txt" "hello"
+  BASE_SHA="$(git rev-parse HEAD)"
+  commit_file "b.txt" "world"
+  HEAD_SHA="$(git rev-parse HEAD)"
+
+  export PARAM_BASE_REF="$BASE_SHA"
+  export PARAM_HEAD_REF="$HEAD_SHA"
+  malicious_payload="${TEST_DIR}/payload-\$(touch should-not-run).json"
+  export DEPLOY_DIFF_PAYLOAD_FILE="$malicious_payload"
+
+  run bash "$PAYLOAD_SCRIPT"
+  [ "$status" -eq 0 ]
+  marker_dir="$(mktemp -d)"
+  ( cd "$marker_dir" && bash -c 'source "$1"' _ "$BASH_ENV" )
+  [ ! -e "$marker_dir/should-not-run" ]
+  [ ! -e "should-not-run" ]
+  payload_from_env="$(bash -c 'source "$1" && printf %s "$DEPLOY_DIFF_PAYLOAD_FILE"' _ "$BASH_ENV")"
+  [ "$payload_from_env" = "$malicious_payload" ]
+  [ -f "$malicious_payload" ]
 }
