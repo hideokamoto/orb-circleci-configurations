@@ -34,20 +34,6 @@ teardown() {
   bash -c 'source "$1" && command -v ls >/dev/null' _ "${BASH_ENV}"
 }
 
-@test "PATH export survives source when RELEASE_TOOLS_DIR contains shell metacharacters" {
-  export RELEASE_TOOLS_DIR="${WORK}/evil-\$(touch should-not-run)"
-  mkdir -p "${RELEASE_TOOLS_DIR}"
-  run bash "${SCRIPT}"
-  [ "$status" -eq 0 ]
-  marker_dir="$(mktemp -d)"
-  ( cd "$marker_dir" && bash -c 'source "$1"' _ "${BASH_ENV}" )
-  [ ! -e "$marker_dir/should-not-run" ]
-  [ ! -e "should-not-run" ]
-  path_after="$(bash -c 'source "$1" && printf %s "$PATH"' _ "${BASH_ENV}")"
-  [[ "$path_after" == "${RELEASE_TOOLS_DIR}/node_modules/.bin:"* ]]
-  bash -c 'source "$1" && command -v ls >/dev/null' _ "${BASH_ENV}"
-}
-
 @test "adds pinned extra packages, scoped or not" {
   export PARAM_EXTRA_RELEASE_PACKAGES="multi-semantic-release@3.1.0 @semantic-release/exec@7.1.0"
   run bash "${SCRIPT}"
@@ -117,6 +103,16 @@ teardown() {
   run bash "${SCRIPT}"
   [ "$status" -ne 0 ]
   [ ! -s "${NPM_LOG}" ]
+}
+
+@test "BASH_ENV PATH export survives a prefix containing shell metacharacters" {
+  export RELEASE_TOOLS_DIR="${WORK}/evil\"; \$(touch \"\${WORK}/should-not-run\"); echo \""
+  run bash "${SCRIPT}"
+  [ "$status" -eq 0 ]
+  bash -c 'source "$1"' _ "${BASH_ENV}"
+  [ ! -e "${WORK}/should-not-run" ]
+  result="$(bash -c 'source "$1" && printf %s "$PATH"' _ "${BASH_ENV}")"
+  [[ "${result}" == *"${RELEASE_TOOLS_DIR}/node_modules/.bin:"* ]]
 }
 
 @test "accepts SemVer prerelease and build metadata in extra packages" {

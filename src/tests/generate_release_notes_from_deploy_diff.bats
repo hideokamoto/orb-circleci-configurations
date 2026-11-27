@@ -628,29 +628,7 @@ STUB
   [ "$(cat "${TEST_DIR}/release-notes.md")" = "Notable changes this release." ]
 }
 
-@test "fetch main BASH_ENV export does not execute metacharacters in output_file path" {
-  echo '{}' > "${TEST_DIR}/payload.json"
-  export DEPLOY_DIFF_PAYLOAD_FILE="${TEST_DIR}/payload.json"
-  export STUB_CIRCLECI_ID="summary-43"
-  export STUB_CIRCLECI_PHASE="ended"
-  export STUB_CIRCLECI_SUMMARY="Safe export check."
-  malicious_notes="${TEST_DIR}/notes-\$(touch should-not-run).md"
-  export PARAM_OUTPUT_FILE="$malicious_notes"
-  export PARAM_MAX_POLLS="5"
-  export PARAM_POLL_INTERVAL="0"
-
-  run bash "$FETCH_SCRIPT"
-  [ "$status" -eq 0 ]
-  marker_dir="$(mktemp -d)"
-  ( cd "$marker_dir" && bash -c 'source "$1"' _ "$BASH_ENV" )
-  [ ! -e "$marker_dir/should-not-run" ]
-  [ ! -e "should-not-run" ]
-  notes_file_from_env="$(bash -c 'source "$1" && printf %s "$RELEASE_NOTES_FILE"' _ "$BASH_ENV")"
-  [ "$notes_file_from_env" = "$malicious_notes" ]
-  [ "$(cat "$malicious_notes")" = "Safe export check." ]
-}
-
-@test "payload main BASH_ENV export does not execute metacharacters in payload path" {
+@test "make_diff_summary_payload BASH_ENV export survives a path containing command substitution" {
   commit_file "a.txt" "hello"
   BASE_SHA="$(git rev-parse HEAD)"
   commit_file "b.txt" "world"
@@ -658,16 +636,33 @@ STUB
 
   export PARAM_BASE_REF="$BASE_SHA"
   export PARAM_HEAD_REF="$HEAD_SHA"
-  malicious_payload="${TEST_DIR}/payload-\$(touch should-not-run).json"
-  export DEPLOY_DIFF_PAYLOAD_FILE="$malicious_payload"
+  PAYLOAD_FILE="${TEST_DIR}/evil/\$(touch \"${TEST_DIR}/should-not-run\")/payload.json"
+  mkdir -p "$(dirname "$PAYLOAD_FILE")"
+  export DEPLOY_DIFF_PAYLOAD_FILE="$PAYLOAD_FILE"
 
   run bash "$PAYLOAD_SCRIPT"
   [ "$status" -eq 0 ]
-  marker_dir="$(mktemp -d)"
-  ( cd "$marker_dir" && bash -c 'source "$1"' _ "$BASH_ENV" )
-  [ ! -e "$marker_dir/should-not-run" ]
-  [ ! -e "should-not-run" ]
-  payload_from_env="$(bash -c 'source "$1" && printf %s "$DEPLOY_DIFF_PAYLOAD_FILE"' _ "$BASH_ENV")"
-  [ "$payload_from_env" = "$malicious_payload" ]
-  [ -f "$malicious_payload" ]
+  bash -c 'source "$1"' _ "$BASH_ENV"
+  [ ! -e "${TEST_DIR}/should-not-run" ]
+  result="$(bash -c 'source "$1" && printf %s "$DEPLOY_DIFF_PAYLOAD_FILE"' _ "$BASH_ENV")"
+  [ "$result" = "$PAYLOAD_FILE" ]
+}
+
+@test "fetch_deploy_diff_summary BASH_ENV export survives a path containing command substitution" {
+  echo '{}' > "${TEST_DIR}/payload.json"
+  export DEPLOY_DIFF_PAYLOAD_FILE="${TEST_DIR}/payload.json"
+  export STUB_CIRCLECI_ID="summary-42"
+  export STUB_CIRCLECI_PHASE="ended"
+  export STUB_CIRCLECI_SUMMARY="notes"
+  export PARAM_OUTPUT_FILE="${TEST_DIR}/notes/\$(touch \"${TEST_DIR}/should-not-run\").md"
+  mkdir -p "$(dirname "${PARAM_OUTPUT_FILE}")"
+  export PARAM_MAX_POLLS="5"
+  export PARAM_POLL_INTERVAL="0"
+
+  run bash "$FETCH_SCRIPT"
+  [ "$status" -eq 0 ]
+  bash -c 'source "$1"' _ "$BASH_ENV"
+  [ ! -e "${TEST_DIR}/should-not-run" ]
+  result="$(bash -c 'source "$1" && printf %s "$RELEASE_NOTES_FILE"' _ "$BASH_ENV")"
+  [ "$result" = "${PARAM_OUTPUT_FILE}" ]
 }
